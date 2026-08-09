@@ -71,7 +71,30 @@ async function doLogin() {
   }
 }
 
+/**
+ * Deja la pantalla en blanco/oculta todo lo que dependa de una sesión anterior.
+ * Se llama SIEMPRE al iniciar sesión y al cerrar sesión, para que nunca queden
+ * restos visuales de la cuenta anterior (por ejemplo, el panel de Administrador
+ * quedando visible si el usuario siguiente es un usuario normal).
+ */
+function resetAppView() {
+  document.querySelectorAll('.tab-content').forEach(function (el) { el.classList.add('hidden'); });
+  document.getElementById('tab-upload').classList.remove('hidden'); // pestaña por defecto para admin
+  document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.remove('active'); });
+  document.querySelector('.tab-btn[data-tab="tab-upload"]').classList.add('active');
+
+  document.getElementById('usersTableBody').innerHTML = '';
+  document.getElementById('dataCardAdmin').innerHTML = '';
+  document.getElementById('dataCardUser').innerHTML = '';
+  document.getElementById('metaStats').innerHTML = '';
+  document.getElementById('uploadedFilesList').innerHTML = '';
+  document.getElementById('processProgress').innerHTML = '';
+
+  if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
+}
+
 function onLoginSuccess() {
+  resetAppView();
   document.getElementById('view-login').classList.add('hidden');
   document.getElementById('view-app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = STATE.username + ' (' + (STATE.rol === 'ADMIN' ? 'Administrador' : 'Usuario') + ')';
@@ -93,6 +116,7 @@ function onLoginSuccess() {
 async function doLogout(skipCall) {
   if (!skipCall) { try { await api('/logout', { method: 'POST' }); } catch (e) {} }
   STATE = { rol: null, username: null, metaLists: { comunas: [], tipos: [], regionByComuna: {}, regiones: [] }, dataPage: 0, dataPageSize: 100, dataSearch: '', dataTipoFilter: [], usersCache: [], processing: false };
+  resetAppView();
   document.getElementById('view-app').classList.add('hidden');
   document.getElementById('view-login').classList.remove('hidden');
   document.getElementById('loginUsername').value = '';
@@ -596,3 +620,4 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+

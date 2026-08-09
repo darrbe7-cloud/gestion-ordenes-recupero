@@ -87,7 +87,6 @@ function resetAppView() {
   document.getElementById('dataCardAdmin').innerHTML = '';
   document.getElementById('dataCardUser').innerHTML = '';
   document.getElementById('metaStats').innerHTML = '';
-  document.getElementById('uploadedFilesList').innerHTML = '';
   document.getElementById('processProgress').innerHTML = '';
 
   if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
@@ -620,4 +619,3 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-

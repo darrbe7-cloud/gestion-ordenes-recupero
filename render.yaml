@@ -1,0 +1,22 @@
+databases:
+  - name: gestion-ordenes-db
+    plan: free
+    databaseName: gestion_ordenes
+    user: gestion_ordenes_user
+
+services:
+  - type: web
+    name: gestion-ordenes-recupero
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gestion-ordenes-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production

@@ -79,7 +79,6 @@ async function doLogin() {
  */
 function resetAppView() {
   document.querySelectorAll('.tab-content').forEach(function (el) { el.classList.add('hidden'); });
-  document.getElementById('tab-upload').classList.remove('hidden'); // pestaña por defecto para admin
   document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.remove('active'); });
   document.querySelector('.tab-btn[data-tab="tab-upload"]').classList.add('active');
 

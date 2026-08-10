@@ -736,36 +736,67 @@ function renderClienteCards_(rows) {
   return html;
 }
 
+var AGENDADOS_CACHE = [];
+var AGENDADOS_FILTRO_FECHA = '';
+
 async function loadAgendados() {
   var card = document.getElementById('cardAgendados');
   card.innerHTML = '<h2>Agendados</h2><p class="muted">Cargando...</p>';
   try {
     var rows = await api('/gestiones/agendados');
+    AGENDADOS_CACHE = rows;
     var hoy = new Date().toISOString().slice(0, 10);
-    var html = '<h2>Agendados (' + rows.length + ')</h2>';
-    if (!rows.length) {
-      html += '<p class="muted">No tienes retiros agendados/pendientes.</p>';
-    } else {
-      html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Motivo</th><th>Detalle</th><th>Agendado para</th><th></th></tr></thead><tbody>';
-      rows.forEach(function (r) {
-        var esHoy = r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === hoy;
-        var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
-        html += '<tr' + (esHoy ? ' style="background:#fff8e1;"' : '') + '>' +
-          '<td>' + escapeHtml(r.nombre) + '</td>' +
-          '<td>' + escapeHtml(r.comuna) + '</td>' +
-          '<td>' + escapeHtml(r.direccion) + '</td>' +
-          '<td>' + escapeHtml(r.motivo_texto || '') + '</td>' +
-          '<td>' + escapeHtml(r.detalle || '') + '</td>' +
-          '<td>' + (r.fecha_agendada ? new Date(r.fecha_agendada).toLocaleDateString('es-CL') + (esHoy ? ' (HOY)' : '') : 'Sin fecha') + '</td>' +
-          '<td><button class="btn-secondary" onclick=\'openGestionModal(' + payload + ')\'>Actualizar</button></td>' +
-        '</tr>';
-      });
-      html += '</tbody></table>';
-    }
-    card.innerHTML = html;
+    if (AGENDADOS_FILTRO_FECHA === undefined) AGENDADOS_FILTRO_FECHA = '';
+    renderAgendadosTabla_(hoy);
   } catch (e) {
     card.innerHTML = '<h2>Agendados</h2><p class="error-text">' + e.message + '</p>';
   }
+}
+
+function renderAgendadosTabla_(hoyParam) {
+  var card = document.getElementById('cardAgendados');
+  var hoy = hoyParam || new Date().toISOString().slice(0, 10);
+  var rows = AGENDADOS_CACHE;
+  var filtered = AGENDADOS_FILTRO_FECHA
+    ? rows.filter(function (r) { return r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === AGENDADOS_FILTRO_FECHA; })
+    : rows;
+
+  var html =
+    '<div class="toolbar" style="justify-content: space-between;">' +
+      '<h2 style="margin:0;">Agendados (' + filtered.length + (AGENDADOS_FILTRO_FECHA ? ' de ' + rows.length : '') + ')</h2>' +
+    '</div>' +
+    '<div class="toolbar">' +
+      '<label class="muted" style="margin:0;">Ver fecha:</label>' +
+      '<input type="date" id="agendadosFechaFiltro" value="' + AGENDADOS_FILTRO_FECHA + '" onchange="filtrarAgendadosPorFecha(this.value)">' +
+      '<button class="btn-secondary" onclick="filtrarAgendadosPorFecha(\'' + hoy + '\')">Hoy</button>' +
+      '<button class="btn-secondary" onclick="filtrarAgendadosPorFecha(\'\')">Ver todos</button>' +
+    '</div>';
+
+  if (!filtered.length) {
+    html += '<p class="muted">' + (AGENDADOS_FILTRO_FECHA ? 'No tienes nada agendado para esa fecha.' : 'No tienes retiros agendados/pendientes.') + '</p>';
+  } else {
+    html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Motivo</th><th>Detalle</th><th>Agendado para</th><th></th></tr></thead><tbody>';
+    filtered.forEach(function (r) {
+      var esHoy = r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === hoy;
+      var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
+      html += '<tr' + (esHoy ? ' style="background:#fff8e1;"' : '') + '>' +
+        '<td>' + escapeHtml(r.nombre) + '</td>' +
+        '<td>' + escapeHtml(r.comuna) + '</td>' +
+        '<td>' + escapeHtml(r.direccion) + '</td>' +
+        '<td>' + escapeHtml(r.motivo_texto || '') + '</td>' +
+        '<td>' + escapeHtml(r.detalle || '') + '</td>' +
+        '<td>' + (r.fecha_agendada ? new Date(r.fecha_agendada).toLocaleDateString('es-CL') + (esHoy ? ' (HOY)' : '') : 'Sin fecha') + '</td>' +
+        '<td><button class="btn-secondary" onclick=\'openGestionModal(' + payload + ')\'>Actualizar</button></td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  card.innerHTML = html;
+}
+
+function filtrarAgendadosPorFecha(fecha) {
+  AGENDADOS_FILTRO_FECHA = fecha || '';
+  renderAgendadosTabla_();
 }
 
 async function loadGestionados() {

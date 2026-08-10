@@ -55,14 +55,17 @@ async function initSchema() {
       rut TEXT,
       nombre TEXT,
       comuna TEXT,
+      region TEXT,
       direccion TEXT,
       tipo TEXT,
       raw JSONB NOT NULL
     );
   `);
+  await query(`ALTER TABLE data_rows ADD COLUMN IF NOT EXISTS region TEXT;`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_comuna ON data_rows (comuna);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_tipo ON data_rows (tipo);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_rut ON data_rows (rut);`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_rut_direccion ON data_rows (rut, direccion);`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS meta (
@@ -70,6 +73,40 @@ async function initSchema() {
       value TEXT
     );
   `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS motivos_pendiente (
+      id SERIAL PRIMARY KEY,
+      texto TEXT NOT NULL,
+      activo BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS gestiones (
+      id BIGSERIAL PRIMARY KEY,
+      rut TEXT NOT NULL,
+      nombre TEXT,
+      comuna TEXT,
+      region TEXT,
+      direccion TEXT NOT NULL,
+      tipos_json JSONB,
+      cantidad_equipos INTEGER,
+      casa TEXT,
+      celular TEXT,
+      tecnico_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      tecnico_username TEXT,
+      estado TEXT NOT NULL,
+      motivo_id INTEGER REFERENCES motivos_pendiente(id),
+      detalle TEXT,
+      fecha_agendada DATE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_gestiones_rut_direccion ON gestiones (rut, direccion);`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_gestiones_tecnico ON gestiones (tecnico_id);`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_gestiones_created ON gestiones (created_at);`);
 
   var adminCount = await query("SELECT COUNT(*) FROM users WHERE rol = 'ADMIN'");
   if (Number(adminCount.rows[0].count) === 0) {

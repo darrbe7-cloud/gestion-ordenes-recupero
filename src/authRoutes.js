@@ -36,3 +36,4 @@ router.post('/change-password', auth.requireAuth, async function (req, res) {
 });
 
 module.exports = router;
+

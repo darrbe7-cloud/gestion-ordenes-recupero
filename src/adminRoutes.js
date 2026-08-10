@@ -142,4 +142,113 @@ router.get('/process-status', function (req, res) {
   res.json(processFile.getStatus());
 });
 
+// ---------------------------------------------------------
+// MOTIVOS DE PENDIENTE (predefinidos por el admin)
+// ---------------------------------------------------------
+router.get('/motivos', async function (req, res) {
+  var result = await db.query('SELECT id, texto, activo FROM motivos_pendiente ORDER BY texto');
+  res.json(result.rows);
+});
+
+router.post('/motivos', async function (req, res) {
+  var texto = (req.body.texto || '').trim();
+  if (!texto) return res.json({ ok: false, error: 'Escribe el texto del motivo.' });
+  var result = await db.query('INSERT INTO motivos_pendiente (texto) VALUES ($1) RETURNING id', [texto]);
+  res.json({ ok: true, id: result.rows[0].id });
+});
+
+router.put('/motivos/:id', async function (req, res) {
+  var fields = [];
+  var values = [];
+  var p = 1;
+  if (req.body.texto !== undefined) { fields.push('texto = $' + p++); values.push(req.body.texto.trim()); }
+  if (req.body.activo !== undefined) { fields.push('activo = $' + p++); values.push(req.body.activo === true); }
+  if (!fields.length) return res.json({ ok: true });
+  values.push(req.params.id);
+  await db.query('UPDATE motivos_pendiente SET ' + fields.join(', ') + ' WHERE id = $' + p, values);
+  res.json({ ok: true });
+});
+
+router.delete('/motivos/:id', async function (req, res) {
+  await db.query('DELETE FROM motivos_pendiente WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------
+// VISTA GLOBAL DE GESTIÓN (todos los técnicos)
+// ---------------------------------------------------------
+router.get('/gestiones', async function (req, res) {
+  var page = parseInt(req.query.page || '0', 10);
+  var pageSize = Math.min(parseInt(req.query.pageSize || '100', 10), 500);
+  var estado = req.query.estado || ''; // '', 'PENDIENTE', 'REALIZADO'
+  var tecnico = req.query.tecnico || '';
+
+  var conditions = [];
+  var params = [];
+  var p = 1;
+  if (estado) { conditions.push('estado = $' + p++); params.push(estado); }
+  if (tecnico) { conditions.push('tecnico_username = $' + p++); params.push(tecnico); }
+  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  var sqlBase = `
+    WITH ultimos AS (
+      SELECT DISTINCT ON (rut, direccion, tecnico_id) g.*, m.texto AS motivo_texto
+      FROM gestiones g
+      LEFT JOIN motivos_pendiente m ON m.id = g.motivo_id
+      ORDER BY rut, direccion, tecnico_id, created_at DESC
+    )
+    SELECT * FROM ultimos ${where}
+  `;
+
+  var countResult = await db.query('SELECT COUNT(*) FROM (' + sqlBase + ') x', params);
+  var total = Number(countResult.rows[0].count);
+
+  var params2 = params.slice();
+  params2.push(pageSize, page * pageSize);
+  var result = await db.query(sqlBase + ' ORDER BY created_at DESC LIMIT $' + p + ' OFFSET $' + (p + 1), params2);
+
+  res.json({ total: total, page: page, pageSize: pageSize, rows: result.rows });
+});
+
+router.get('/gestiones/export', async function (req, res) {
+  var estado = req.query.estado || '';
+  var conditions = [];
+  var params = [];
+  var p = 1;
+  if (estado) { conditions.push('estado = $' + p++); params.push(estado); }
+  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  var sql = `
+    WITH ultimos AS (
+      SELECT DISTINCT ON (rut, direccion, tecnico_id) g.*, m.texto AS motivo_texto
+      FROM gestiones g
+      LEFT JOIN motivos_pendiente m ON m.id = g.motivo_id
+      ORDER BY rut, direccion, tecnico_id, created_at DESC
+    )
+    SELECT * FROM ultimos ${where} ORDER BY created_at DESC
+  `;
+  var result = await db.query(sql, params);
+
+  if (!result.rows.length) return res.status(404).json({ ok: false, error: 'No hay registros de gestión para exportar.' });
+
+  var filename = 'gestion_completa_' + Date.now() + '.xlsx';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+
+  var ExcelJS = require('exceljs');
+  var workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res });
+  var sheet = workbook.addWorksheet('Gestión');
+  sheet.addRow(['TECNICO', 'RUT', 'NOMBRE', 'REGION', 'COMUNA', 'DIRECCION', 'TIPOS', 'CANTIDAD_EQUIPOS', 'ESTADO', 'MOTIVO', 'DETALLE', 'FECHA_AGENDADA', 'FECHA_GESTION']).commit();
+  result.rows.forEach(function (r) {
+    sheet.addRow([
+      r.tecnico_username, r.rut, r.nombre, r.region, r.comuna, r.direccion,
+      (r.tipos_json || []).join(', '), r.cantidad_equipos, r.estado, r.motivo_texto || '', r.detalle || '',
+      r.fecha_agendada ? new Date(r.fecha_agendada).toLocaleDateString('es-CL') : '',
+      new Date(r.created_at).toLocaleString('es-CL')
+    ]).commit();
+  });
+  sheet.commit();
+  await workbook.commit();
+});
+
 module.exports = router;

@@ -37,7 +37,7 @@ async function api(path, options) {
 var sessionExpiredHandled = false;
 
 function handleSessionExpired() {
-  if (sessionExpiredHandled) return;
+  if (sessionExpiredHandled) return; // evita mostrarlo varias veces si fallan varias peticiones a la vez
   sessionExpiredHandled = true;
   doLogout(true);
   var errEl = document.getElementById('loginError');
@@ -94,6 +94,11 @@ function resetAppView() {
   document.getElementById('dataCardUser').innerHTML = '';
   document.getElementById('metaStats').innerHTML = '';
   document.getElementById('processProgress').innerHTML = '';
+  document.getElementById('motivosTableBody').innerHTML = '';
+  document.getElementById('gestionGlobalTableBody').innerHTML = '';
+  document.getElementById('cardSinGestionar').innerHTML = '';
+  document.getElementById('cardAgendados').innerHTML = '';
+  document.getElementById('cardGestionados').innerHTML = '';
 
   if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
 }
@@ -113,8 +118,7 @@ function onLoginSuccess() {
   } else {
     document.getElementById('adminTabs').classList.add('hidden');
     document.getElementById('userDashboard').classList.remove('hidden');
-    renderDataView('dataCardUser', false);
-    loadDataTable('dataCardUser');
+    switchUserTab('u-sin-gestionar');
   }
 }
 
@@ -129,12 +133,19 @@ async function doLogout(skipCall) {
 }
 
 // Al cargar la página, revisar si ya hay una sesión activa (cookie válida)
+// Al cargar la página, revisar EN SILENCIO si ya hay una sesión activa
+// (cookie válida). Se usa fetch directo (no la función api()) a propósito,
+// para que un "no hay sesión todavía" (lo normal al abrir la página) no
+// dispare el aviso de "tu sesión expiró" — ese aviso debe verse solo cuando
+// una sesión que SÍ estaba activa deja de serlo en medio del uso.
 window.addEventListener('DOMContentLoaded', async function () {
   try {
-    var res = await api('/me');
-    if (res.ok) {
-      STATE.rol = res.rol;
-      STATE.username = res.username;
+    var res = await fetch('/api/me', { credentials: 'same-origin' });
+    if (res.status !== 200) return; // no hay sesión, se queda en el login sin avisos
+    var data = await res.json();
+    if (data.ok) {
+      STATE.rol = data.rol;
+      STATE.username = data.username;
       onLoginSuccess();
     }
   } catch (e) { /* no hay sesión, se queda en el login */ }
@@ -184,6 +195,8 @@ function switchTab(tabId) {
   if (tabId === 'tab-users') loadUsers();
   if (tabId === 'tab-data') { renderDataView('dataCardAdmin', true); loadDataTable('dataCardAdmin'); }
   if (tabId === 'tab-upload') loadMetaStats();
+  if (tabId === 'tab-motivos') loadMotivos();
+  if (tabId === 'tab-gestion') loadGestionGlobal();
 }
 
 // ---------------------------------------------------------
@@ -624,4 +637,318 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function downloadBase64FromResponse_(blob, filename) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function downloadFileFromApi_(url, btn, defaultName) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generando...'; }
+  try {
+    var res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) {
+      var errData = await res.json().catch(function () { return {}; });
+      alert('Error: ' + (errData.error || ('Error ' + res.status)));
+      return;
+    }
+    var disposition = res.headers.get('Content-Disposition') || '';
+    var match = disposition.match(/filename="(.+)"/);
+    var filename = match ? match[1] : defaultName;
+    var blob = await res.blob();
+    downloadBase64FromResponse_(blob, filename);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Descargar Excel'; }
+  }
+}
+
+// ---------------------------------------------------------
+// PESTAÑAS DEL TÉCNICO (Sin gestionar / Agendados / Gestionados / Base completa)
+// ---------------------------------------------------------
+function switchUserTab(tabId) {
+  document.querySelectorAll('#u-sin-gestionar, #u-agendados, #u-gestionados, #u-base').forEach(function (el) { el.classList.add('hidden'); });
+  document.querySelectorAll('#userTabs .tab-btn').forEach(function (el) { el.classList.remove('active'); });
+  document.getElementById(tabId).classList.remove('hidden');
+  document.querySelector('#userTabs .tab-btn[data-utab="' + tabId + '"]').classList.add('active');
+
+  if (tabId === 'u-sin-gestionar') loadSinGestionar();
+  if (tabId === 'u-agendados') loadAgendados();
+  if (tabId === 'u-gestionados') loadGestionados();
+  if (tabId === 'u-base') { renderDataView('dataCardUser', false); loadDataTable('dataCardUser'); }
+}
+
+var STATE_SIN_GESTIONAR_PAGE = 0;
+
+async function loadSinGestionar() {
+  var card = document.getElementById('cardSinGestionar');
+  card.innerHTML = '<h2>Clientes sin gestionar</h2><p class="muted">Cargando...</p>';
+  try {
+    var res = await api('/gestiones/pendientes-sin-gestionar?page=' + STATE_SIN_GESTIONAR_PAGE + '&pageSize=30');
+    var html = '<h2>Clientes sin gestionar (' + res.total + ')</h2>';
+    if (!res.rows.length) {
+      html += '<p class="muted">No hay clientes pendientes de gestionar en tu zona. 🎉</p>';
+    } else {
+      html += renderClienteCards_(res.rows);
+      var totalPages = Math.max(1, Math.ceil(res.total / 30));
+      html += '<div class="pagination"><span>Página ' + (STATE_SIN_GESTIONAR_PAGE + 1) + ' de ' + totalPages + '</span>' +
+        '<button class="btn-secondary" ' + (STATE_SIN_GESTIONAR_PAGE <= 0 ? 'disabled' : '') + ' onclick="changeSinGestionarPage(-1)">Anterior</button>' +
+        '<button class="btn-secondary" ' + (STATE_SIN_GESTIONAR_PAGE + 1 >= totalPages ? 'disabled' : '') + ' onclick="changeSinGestionarPage(1)">Siguiente</button></div>';
+    }
+    card.innerHTML = html;
+  } catch (e) {
+    card.innerHTML = '<h2>Clientes sin gestionar</h2><p class="error-text">' + e.message + '</p>';
+  }
+}
+
+function changeSinGestionarPage(delta) {
+  STATE_SIN_GESTIONAR_PAGE = Math.max(0, STATE_SIN_GESTIONAR_PAGE + delta);
+  loadSinGestionar();
+}
+
+function renderClienteCards_(rows) {
+  var html = '<div>';
+  rows.forEach(function (r) {
+    var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
+    html +=
+      '<div class="card" style="margin-bottom:10px; padding:14px;">' +
+        '<div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">' +
+          '<div>' +
+            '<div style="font-weight:600;">' + escapeHtml(r.nombre) + ' — ' + escapeHtml(r.rut) + '</div>' +
+            '<div class="muted">' + escapeHtml(r.region || '') + (r.region ? ' · ' : '') + escapeHtml(r.comuna) + '</div>' +
+            '<div class="muted">' + escapeHtml(r.direccion) + '</div>' +
+            '<div class="muted">Tel. casa: ' + escapeHtml(r.casa || '—') + ' · Celular: ' + escapeHtml(r.celular || '—') + '</div>' +
+            '<div class="muted">Equipos: ' + r.cantidad_equipos + ' (' + escapeHtml((r.tipos || []).join(', ')) + ')</div>' +
+          '</div>' +
+          '<button class="btn-primary" onclick=\'openGestionModal(' + payload + ')\'>Gestionar</button>' +
+        '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+async function loadAgendados() {
+  var card = document.getElementById('cardAgendados');
+  card.innerHTML = '<h2>Agendados</h2><p class="muted">Cargando...</p>';
+  try {
+    var rows = await api('/gestiones/agendados');
+    var hoy = new Date().toISOString().slice(0, 10);
+    var html = '<h2>Agendados (' + rows.length + ')</h2>';
+    if (!rows.length) {
+      html += '<p class="muted">No tienes retiros agendados/pendientes.</p>';
+    } else {
+      html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Motivo</th><th>Detalle</th><th>Agendado para</th><th></th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        var esHoy = r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === hoy;
+        var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
+        html += '<tr' + (esHoy ? ' style="background:#fff8e1;"' : '') + '>' +
+          '<td>' + escapeHtml(r.nombre) + '</td>' +
+          '<td>' + escapeHtml(r.comuna) + '</td>' +
+          '<td>' + escapeHtml(r.direccion) + '</td>' +
+          '<td>' + escapeHtml(r.motivo_texto || '') + '</td>' +
+          '<td>' + escapeHtml(r.detalle || '') + '</td>' +
+          '<td>' + (r.fecha_agendada ? new Date(r.fecha_agendada).toLocaleDateString('es-CL') + (esHoy ? ' (HOY)' : '') : 'Sin fecha') + '</td>' +
+          '<td><button class="btn-secondary" onclick=\'openGestionModal(' + payload + ')\'>Actualizar</button></td>' +
+        '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    card.innerHTML = html;
+  } catch (e) {
+    card.innerHTML = '<h2>Agendados</h2><p class="error-text">' + e.message + '</p>';
+  }
+}
+
+async function loadGestionados() {
+  var card = document.getElementById('cardGestionados');
+  card.innerHTML = '<h2>Gestionados</h2><p class="muted">Cargando...</p>';
+  try {
+    var rows = await api('/gestiones/gestionados');
+    var html = '<div class="toolbar" style="justify-content: space-between;"><h2 style="margin:0;">Gestionados (' + rows.length + ')</h2>' +
+      '<button class="btn-primary" onclick="downloadGestionadosPropio()">Descargar Excel</button></div>';
+    if (!rows.length) {
+      html += '<p class="muted">Aún no has marcado retiros como realizados.</p>';
+    } else {
+      html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Equipos</th><th>Fecha</th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        html += '<tr>' +
+          '<td>' + escapeHtml(r.nombre) + '</td>' +
+          '<td>' + escapeHtml(r.comuna) + '</td>' +
+          '<td>' + escapeHtml(r.direccion) + '</td>' +
+          '<td>' + r.cantidad_equipos + '</td>' +
+          '<td>' + new Date(r.created_at).toLocaleString('es-CL') + '</td>' +
+        '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    card.innerHTML = html;
+  } catch (e) {
+    card.innerHTML = '<h2>Gestionados</h2><p class="error-text">' + e.message + '</p>';
+  }
+}
+
+function downloadGestionadosPropio() {
+  downloadFileFromApi_('/api/gestiones/gestionados/export', null, 'retiros_realizados.xlsx');
+}
+
+// ---- Modal de gestión ----
+var GESTION_CLIENTE_ACTUAL = null;
+
+async function openGestionModal(cliente) {
+  GESTION_CLIENTE_ACTUAL = cliente;
+  document.getElementById('gestionModalCliente').textContent = cliente.nombre + ' — ' + cliente.direccion + ' (' + cliente.comuna + ')';
+  document.getElementById('gestionEstadoInput').value = 'REALIZADO';
+  document.getElementById('gestionDetalleInput').value = '';
+  document.getElementById('gestionFechaInput').value = '';
+  document.getElementById('gestionModalError').classList.add('hidden');
+
+  try {
+    var motivos = await api('/gestiones/motivos');
+    var sel = document.getElementById('gestionMotivoInput');
+    sel.innerHTML = motivos.map(function (m) { return '<option value="' + m.id + '">' + escapeHtml(m.texto) + '</option>'; }).join('');
+    if (!motivos.length) sel.innerHTML = '<option value="">(no hay motivos configurados, pide al admin que agregue uno)</option>';
+  } catch (e) {}
+
+  toggleMotivoField();
+  document.getElementById('gestionModalOverlay').classList.remove('hidden');
+}
+
+function closeGestionModal() {
+  document.getElementById('gestionModalOverlay').classList.add('hidden');
+  GESTION_CLIENTE_ACTUAL = null;
+}
+
+function toggleMotivoField() {
+  var estado = document.getElementById('gestionEstadoInput').value;
+  document.getElementById('gestionMotivoWrap').classList.toggle('hidden', estado !== 'PENDIENTE');
+}
+
+async function submitGestion() {
+  if (!GESTION_CLIENTE_ACTUAL) return;
+  var estado = document.getElementById('gestionEstadoInput').value;
+  var motivoId = document.getElementById('gestionMotivoInput').value;
+  var detalle = document.getElementById('gestionDetalleInput').value;
+  var fecha = document.getElementById('gestionFechaInput').value;
+  var errEl = document.getElementById('gestionModalError');
+  errEl.classList.add('hidden');
+
+  try {
+    var res = await api('/gestiones', {
+      method: 'POST',
+      body: JSON.stringify({
+        rut: GESTION_CLIENTE_ACTUAL.rut,
+        direccion: GESTION_CLIENTE_ACTUAL.direccion,
+        estado: estado,
+        motivoId: estado === 'PENDIENTE' ? (motivoId || null) : null,
+        detalle: detalle || null,
+        fechaAgendada: fecha || null
+      })
+    });
+    if (!res.ok) { errEl.textContent = res.error; errEl.classList.remove('hidden'); return; }
+    closeGestionModal();
+    // refrescar la pestaña activa
+    if (!document.getElementById('u-sin-gestionar').classList.contains('hidden')) loadSinGestionar();
+    if (!document.getElementById('u-agendados').classList.contains('hidden')) loadAgendados();
+    if (!document.getElementById('u-gestionados').classList.contains('hidden')) loadGestionados();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ---------------------------------------------------------
+// ADMIN: MOTIVOS
+// ---------------------------------------------------------
+async function loadMotivos() {
+  var tbody = document.getElementById('motivosTableBody');
+  tbody.innerHTML = '<tr><td colspan="3" class="muted">Cargando...</td></tr>';
+  try {
+    var motivos = await api('/admin/motivos');
+    if (!motivos.length) { tbody.innerHTML = '<tr><td colspan="3" class="muted">No hay motivos definidos aún.</td></tr>'; return; }
+    var html = '';
+    motivos.forEach(function (m) {
+      html += '<tr>' +
+        '<td>' + escapeHtml(m.texto) + '</td>' +
+        '<td><span class="badge ' + (m.activo ? 'badge-active' : 'badge-inactive') + '">' + (m.activo ? 'Activo' : 'Inactivo') + '</span></td>' +
+        '<td class="users-table-actions">' +
+          '<button class="btn-secondary" onclick="toggleMotivoActivo(' + m.id + ', ' + (!m.activo) + ')">' + (m.activo ? 'Desactivar' : 'Activar') + '</button>' +
+          '<button class="btn-danger" onclick="eliminarMotivo(' + m.id + ')">Eliminar</button>' +
+        '</td>' +
+      '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="3" class="error-text">' + e.message + '</td></tr>';
+  }
+}
+
+async function crearMotivo() {
+  var input = document.getElementById('nuevoMotivoInput');
+  var texto = input.value.trim();
+  if (!texto) return;
+  try {
+    var res = await api('/admin/motivos', { method: 'POST', body: JSON.stringify({ texto: texto }) });
+    if (!res.ok) { alert('Error: ' + res.error); return; }
+    input.value = '';
+    loadMotivos();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function toggleMotivoActivo(id, nuevoActivo) {
+  try {
+    await api('/admin/motivos/' + id, { method: 'PUT', body: JSON.stringify({ activo: nuevoActivo }) });
+    loadMotivos();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function eliminarMotivo(id) {
+  if (!confirm('¿Eliminar este motivo? Los registros de gestión que ya lo usaron lo conservarán en su historial.')) return;
+  try {
+    await api('/admin/motivos/' + id, { method: 'DELETE' });
+    loadMotivos();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ---------------------------------------------------------
+// ADMIN: VISTA GLOBAL DE GESTIÓN
+// ---------------------------------------------------------
+async function loadGestionGlobal() {
+  var tbody = document.getElementById('gestionGlobalTableBody');
+  tbody.innerHTML = '<tr><td colspan="7" class="muted">Cargando...</td></tr>';
+  try {
+    var estado = document.getElementById('gestionEstadoFilter').value;
+    var qs = estado ? '?estado=' + encodeURIComponent(estado) : '';
+    var res = await api('/admin/gestiones' + qs);
+    if (!res.rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted">Sin registros.</td></tr>'; return; }
+    var html = '';
+    res.rows.forEach(function (r) {
+      html += '<tr>' +
+        '<td>' + escapeHtml(r.tecnico_username) + '</td>' +
+        '<td>' + escapeHtml(r.nombre) + '</td>' +
+        '<td>' + escapeHtml(r.comuna) + '</td>' +
+        '<td>' + escapeHtml(r.direccion) + '</td>' +
+        '<td><span class="badge ' + (r.estado === 'REALIZADO' ? 'badge-active' : 'badge-inactive') + '">' + r.estado + '</span></td>' +
+        '<td>' + escapeHtml(r.motivo_texto || '') + (r.detalle ? ' — ' + escapeHtml(r.detalle) : '') + '</td>' +
+        '<td>' + new Date(r.created_at).toLocaleString('es-CL') + '</td>' +
+      '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="error-text">' + e.message + '</td></tr>';
+  }
+}
+
+function downloadGestionGlobal() {
+  var estado = document.getElementById('gestionEstadoFilter').value;
+  var qs = estado ? '?estado=' + encodeURIComponent(estado) : '';
+  downloadFileFromApi_('/api/admin/gestiones/export' + qs, null, 'gestion_completa.xlsx');
 }

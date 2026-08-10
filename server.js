@@ -7,6 +7,7 @@ const db = require('./src/db');
 const authRoutes = require('./src/authRoutes');
 const adminRoutes = require('./src/adminRoutes');
 const dataRoutes = require('./src/dataRoutes');
+const gestionRoutes = require('./src/gestionRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', dataRoutes);
+app.use('/api/gestiones', gestionRoutes);
 
 app.get('/health', function (req, res) { res.json({ ok: true }); });
 

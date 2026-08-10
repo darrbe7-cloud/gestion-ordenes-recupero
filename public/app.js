@@ -34,9 +34,16 @@ async function api(path, options) {
   return data;
 }
 
+var sessionExpiredHandled = false;
+
 function handleSessionExpired() {
-  alert('Tu sesión expiró. Vuelve a iniciar sesión.');
+  if (sessionExpiredHandled) return;
+  sessionExpiredHandled = true;
   doLogout(true);
+  var errEl = document.getElementById('loginError');
+  errEl.textContent = 'Tu sesión expiró. Vuelve a iniciar sesión.';
+  errEl.classList.remove('hidden');
+  setTimeout(function () { sessionExpiredHandled = false; }, 2000);
 }
 
 // ---------------------------------------------------------

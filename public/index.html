@@ -42,6 +42,8 @@
         <button class="tab-btn active" data-tab="tab-upload" onclick="switchTab('tab-upload')">Cargar archivo</button>
         <button class="tab-btn" data-tab="tab-users" onclick="switchTab('tab-users')">Usuarios</button>
         <button class="tab-btn" data-tab="tab-data" onclick="switchTab('tab-data')">Ver datos</button>
+        <button class="tab-btn" data-tab="tab-motivos" onclick="switchTab('tab-motivos')">Motivos</button>
+        <button class="tab-btn" data-tab="tab-gestion" onclick="switchTab('tab-gestion')">Gestión</button>
       </div>
 
       <!-- TAB: CARGAR ARCHIVO -->
@@ -83,11 +85,101 @@
         <div class="card" id="dataCardAdmin"></div>
       </div>
 
-      <!-- USER DASHBOARD -->
-      <div id="userDashboard" class="hidden">
-        <div class="card" id="dataCardUser"></div>
+      <!-- TAB: MOTIVOS (admin) -->
+      <div id="tab-motivos" class="tab-content hidden">
+        <div class="card">
+          <div class="toolbar" style="justify-content: space-between;">
+            <h2 style="margin:0;">Motivos de pendiente</h2>
+          </div>
+          <p class="muted">Estos son los motivos que los técnicos pueden elegir al marcar un retiro como pendiente. Pueden agregar un detalle libre además del motivo.</p>
+          <div class="form-row" style="margin-bottom:14px;">
+            <input type="text" id="nuevoMotivoInput" placeholder="Ej: Cliente ausente" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px;">
+            <button class="btn-primary" onclick="crearMotivo()">Agregar</button>
+          </div>
+          <table>
+            <thead><tr><th>Motivo</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="motivosTableBody"></tbody>
+          </table>
+        </div>
       </div>
 
+      <!-- TAB: GESTIÓN (admin, vista global) -->
+      <div id="tab-gestion" class="tab-content hidden">
+        <div class="card">
+          <div class="toolbar" style="justify-content: space-between;">
+            <h2 style="margin:0;">Gestión de todos los técnicos</h2>
+            <button class="btn-primary" onclick="downloadGestionGlobal()">Descargar Excel</button>
+          </div>
+          <div class="toolbar">
+            <select id="gestionEstadoFilter" onchange="loadGestionGlobal()" style="padding:8px; border:1px solid var(--border); border-radius:6px;">
+              <option value="">Todos los estados</option>
+              <option value="PENDIENTE">Pendiente</option>
+              <option value="REALIZADO">Realizado</option>
+            </select>
+          </div>
+          <table>
+            <thead><tr><th>Técnico</th><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Estado</th><th>Motivo</th><th>Fecha</th></tr></thead>
+            <tbody id="gestionGlobalTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- USER DASHBOARD (técnico de terreno) -->
+      <div id="userDashboard" class="hidden">
+        <div class="tabs" id="userTabs">
+          <button class="tab-btn active" data-utab="u-sin-gestionar" onclick="switchUserTab('u-sin-gestionar')">Sin gestionar</button>
+          <button class="tab-btn" data-utab="u-agendados" onclick="switchUserTab('u-agendados')">Agendados</button>
+          <button class="tab-btn" data-utab="u-gestionados" onclick="switchUserTab('u-gestionados')">Gestionados</button>
+          <button class="tab-btn" data-utab="u-base" onclick="switchUserTab('u-base')">Base completa</button>
+        </div>
+        <div id="u-sin-gestionar" class="tab-content">
+          <div class="card" id="cardSinGestionar"></div>
+        </div>
+        <div id="u-agendados" class="tab-content hidden">
+          <div class="card" id="cardAgendados"></div>
+        </div>
+        <div id="u-gestionados" class="tab-content hidden">
+          <div class="card" id="cardGestionados"></div>
+        </div>
+        <div id="u-base" class="tab-content hidden">
+          <div class="card" id="dataCardUser"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: GESTIONAR CLIENTE ===================== -->
+  <div id="gestionModalOverlay" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Gestionar retiro</h3>
+      <div id="gestionModalCliente" class="muted" style="margin-bottom:14px;"></div>
+      <div class="field">
+        <label>Estado</label>
+        <select id="gestionEstadoInput" onchange="toggleMotivoField()">
+          <option value="REALIZADO">Retiro realizado</option>
+          <option value="PENDIENTE">Queda pendiente</option>
+        </select>
+      </div>
+      <div id="gestionMotivoWrap">
+        <div class="field">
+          <label>Motivo</label>
+          <select id="gestionMotivoInput"></select>
+        </div>
+        <div class="field">
+          <label>Detalle (opcional)</label>
+          <input type="text" id="gestionDetalleInput" placeholder="Detalle adicional...">
+        </div>
+        <div class="field">
+          <label>Agendar para otro día (opcional)</label>
+          <input type="date" id="gestionFechaInput">
+        </div>
+      </div>
+      <div id="gestionModalError" class="error-text hidden"></div>
+      <div style="display:flex; gap:10px; margin-top: 16px;">
+        <button class="btn-primary" onclick="submitGestion()">Guardar</button>
+        <button class="btn-secondary" onclick="closeGestionModal()">Cancelar</button>
+      </div>
     </div>
   </div>
 

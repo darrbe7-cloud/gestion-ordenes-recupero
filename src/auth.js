@@ -26,16 +26,36 @@ function clearSessionCookie(res) {
 
 /**
  * Middleware: exige sesión válida. Deja los datos del usuario en req.user.
+ *
+ * El JWT solo se usa para confirmar identidad (quién es); el rol, comunas,
+ * tipos y estado "activo" SIEMPRE se leen frescos desde la base de datos en
+ * cada solicitud. Así, si el administrador cambia los permisos de alguien
+ * que ya tiene una sesión abierta, el cambio aplica de inmediato (no hay que
+ * esperar a que expire la sesión vieja).
  */
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   var token = req.cookies[COOKIE_NAME];
   if (!token) return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED' });
+
+  var payload;
   try {
-    var payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload;
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch (e) {
+    // Token realmente inválido o expirado -> esto sí es sesión expirada de verdad.
+    return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED' });
+  }
+
+  try {
+    var result = await db.query('SELECT id, username, rol, comunas, tipos, activo FROM users WHERE id = $1', [payload.id]);
+    if (!result.rows.length || !result.rows[0].activo) {
+      return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED' });
+    }
+    req.user = result.rows[0];
     next();
   } catch (e) {
-    return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED' });
+    // Error real de base de datos (ej. servidor recién despertando) -> NO es
+    // sesión expirada, no debe forzar el logout. Se informa como error normal.
+    return res.status(503).json({ ok: false, error: 'No se pudo conectar a la base de datos. Intenta de nuevo en unos segundos.' });
   }
 }
 

@@ -95,7 +95,7 @@ async function processUploadedFile(filePath, originalName) {
           var rawObj = {};
           headers.forEach(function (h, i) { rawObj[h] = arr[i] !== undefined ? arr[i] : null; });
 
-          batch.push([rut, nombre, comuna, direccion, tipo, JSON.stringify(rawObj)]);
+          batch.push([rut, nombre, comuna, region, direccion, tipo, JSON.stringify(rawObj)]);
           if (comuna) comunasSet[comuna] = true;
           if (tipo) tiposSet[tipo] = true;
           if (comuna && region) regionByComuna[comuna] = region;
@@ -148,10 +148,10 @@ async function insertBatch_(client, batch) {
   var placeholders = [];
   var p = 1;
   batch.forEach(function (row) {
-    placeholders.push('($' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ')');
-    values.push(row[0], row[1], row[2], row[3], row[4], row[5]);
+    placeholders.push('($' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ')');
+    values.push(row[0], row[1], row[2], row[3], row[4], row[5], row[6]);
   });
-  var sql = 'INSERT INTO data_rows (rut, nombre, comuna, direccion, tipo, raw) VALUES ' + placeholders.join(',');
+  var sql = 'INSERT INTO data_rows (rut, nombre, comuna, region, direccion, tipo, raw) VALUES ' + placeholders.join(',');
   await client.query(sql, values);
 }
 

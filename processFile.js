@@ -1,0 +1,244 @@
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+const db = require('./db');
+
+var FILTRO_STATUS_ORDEN = 'P';
+var FILTRO_ORIGEN = ['MOROSIDAD', 'SERVICIO DE BAJA'];
+var FILTRO_STATUS_AB = 'X';
+var BATCH_SIZE = 1000; // filas por lote al insertar en la base de datos
+var GX1_DIAS_MINIMOS_DEFAULT = 90; // valor por defecto si el admin no ha configurado uno propio
+
+// Estado del procesamiento en curso, en memoria (un solo proceso a la vez, por base)
+var STATE = {
+  estado: 'INACTIVO', // INACTIVO | EN_PROGRESO | COMPLETADO | ERROR
+  base: '',
+  archivo: '',
+  filasLeidas: 0,
+  filasCargadas: 0,
+  totalEstimado: 0,
+  error: ''
+};
+
+function getStatus() {
+  return Object.assign({}, STATE);
+}
+
+function isProcessing() {
+  return STATE.estado === 'EN_PROGRESO';
+}
+
+/**
+ * Procesa el archivo subido para una base específica ('GX1' o 'GX2'): lo lee
+ * en modo streaming, aplica el filtro global, y si es GX1 aplica además el
+ * filtro de antigüedad (> 90 días desde FCH_INGRESO). Reemplaza SOLO las
+ * filas de esa base (la otra base no se toca).
+ */
+async function processUploadedFile(filePath, originalName, base) {
+  if (STATE.estado === 'EN_PROGRESO') {
+    throw new Error('Ya hay un procesamiento en curso.');
+  }
+  base = base === 'GX1' ? 'GX1' : 'GX2';
+
+  STATE = { estado: 'EN_PROGRESO', base: base, archivo: originalName, filasLeidas: 0, filasCargadas: 0, totalEstimado: 0, error: '' };
+
+  // Vaciar SOLO las filas de esta base (la otra base queda intacta)
+  await db.query('DELETE FROM data_rows WHERE base = $1', [base]);
+
+  var comunasSet = {};
+  var tiposSet = {};
+  var regionByComuna = {};
+  var headers = null;
+  var idx = {};
+  var batch = [];
+  var client = await db.pool.connect();
+  var hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  var gx1DiasMinimos = GX1_DIAS_MINIMOS_DEFAULT;
+  if (base === 'GX1') {
+    var configurado = await db.getMeta('GX1_DIAS_MINIMOS');
+    if (configurado && !isNaN(Number(configurado))) gx1DiasMinimos = Number(configurado);
+  }
+
+  try {
+    var workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+      entries: 'emit',
+      sharedStrings: 'cache',
+      styles: 'ignore',
+      worksheets: 'emit'
+    });
+
+    for await (const worksheetReader of workbookReader) {
+      for await (const row of worksheetReader) {
+        var values = row.values; // 1-indexado, values[0] es undefined
+        var arr = [];
+        for (var c = 1; c < values.length; c++) arr.push(normalizeCell_(values[c]));
+
+        if (!headers) {
+          headers = arr.map(function (h) { return String(h || '').trim(); });
+          idx = {};
+          headers.forEach(function (h, i) { idx[h] = i; });
+
+          ['STATUS_ORDEN', 'ORIGEN', 'STATUS_AB', 'COMUNA', 'TIPO', 'RUT', 'NOMBRE', 'DIRECCION', 'REGION', 'FCH_INGRESO'].forEach(function (col) {
+            if (idx[col] === undefined) throw new Error('El archivo no tiene la columna requerida: ' + col);
+          });
+
+          await db.setMeta('HEADERS_JSON_' + base, JSON.stringify(headers));
+          continue;
+        }
+
+        STATE.filasLeidas++;
+
+        var statusOrden = arr[idx['STATUS_ORDEN']];
+        var origen = arr[idx['ORIGEN']];
+        var statusAb = arr[idx['STATUS_AB']];
+
+        var pasaFiltroBase =
+          statusOrden === FILTRO_STATUS_ORDEN &&
+          FILTRO_ORIGEN.indexOf(origen) !== -1 &&
+          statusAb === FILTRO_STATUS_AB;
+
+        var fchIngreso = pasaFiltroBase ? parseFechaIngreso_(arr[idx['FCH_INGRESO']]) : null;
+
+        var pasaFiltroAntiguedad = true;
+        if (pasaFiltroBase && base === 'GX1') {
+          if (!fchIngreso) {
+            pasaFiltroAntiguedad = false; // sin fecha válida, no se puede confirmar antigüedad -> se excluye
+          } else {
+            var fechaIngresoDate = new Date(fchIngreso + 'T00:00:00');
+            var diasTranscurridos = Math.floor((hoy - fechaIngresoDate) / (1000 * 60 * 60 * 24));
+            pasaFiltroAntiguedad = diasTranscurridos > gx1DiasMinimos;
+          }
+        }
+
+        if (pasaFiltroBase && pasaFiltroAntiguedad) {
+          var rut = arr[idx['RUT']];
+          var nombre = arr[idx['NOMBRE']];
+          var comuna = arr[idx['COMUNA']];
+          var direccion = arr[idx['DIRECCION']];
+          var tipo = arr[idx['TIPO']];
+          var region = arr[idx['REGION']];
+
+          var rawObj = {};
+          headers.forEach(function (h, i) { rawObj[h] = arr[i] !== undefined ? arr[i] : null; });
+
+          batch.push([base, rut, nombre, comuna, region, direccion, tipo, fchIngreso, JSON.stringify(rawObj)]);
+          if (comuna) comunasSet[comuna] = true;
+          if (tipo) tiposSet[tipo] = true;
+          if (comuna && region) regionByComuna[comuna] = region;
+          STATE.filasCargadas++;
+        }
+
+        if (batch.length >= BATCH_SIZE) {
+          await insertBatch_(client, batch);
+          batch = [];
+        }
+      }
+    }
+
+    if (batch.length > 0) {
+      await insertBatch_(client, batch);
+      batch = [];
+    }
+
+    var tiposList = Object.keys(tiposSet).sort();
+
+    await db.setMetaMany([
+      ['LAST_UPLOAD_DATE_' + base, new Date().toISOString()],
+      ['LAST_UPLOAD_FILENAME_' + base, originalName],
+      ['TOTAL_ROWS_RAW_' + base, String(STATE.filasLeidas)],
+      ['TOTAL_ROWS_FILTERED_' + base, String(STATE.filasCargadas)],
+      ['TIPOS_JSON_' + base, JSON.stringify(tiposList)]
+    ]);
+
+    // Recalcular comunas/regiones GLOBALES combinando ambas bases (usadas
+    // para la asignación de territorio por usuario, que aplica a ambas bases).
+    await recalcularComunasRegionesGlobales_();
+
+    STATE.estado = 'COMPLETADO';
+  } catch (err) {
+    STATE.estado = 'ERROR';
+    STATE.error = err.message;
+    throw err;
+  } finally {
+    client.release();
+    try { fs.unlinkSync(filePath); } catch (e) {}
+  }
+}
+
+async function recalcularComunasRegionesGlobales_() {
+  var comunasResult = await db.query('SELECT DISTINCT comuna FROM data_rows WHERE comuna IS NOT NULL AND comuna <> \'\' ORDER BY comuna');
+  var comunasList = comunasResult.rows.map(function (r) { return r.comuna; });
+
+  var regionResult = await db.query(
+    "SELECT DISTINCT comuna, region FROM data_rows WHERE comuna IS NOT NULL AND region IS NOT NULL AND comuna <> '' AND region <> ''"
+  );
+  var regionByComuna = {};
+  var regionesSet = {};
+  regionResult.rows.forEach(function (r) {
+    regionByComuna[r.comuna] = r.region;
+    regionesSet[r.region] = true;
+  });
+  var regionesList = Object.keys(regionesSet).sort();
+
+  await db.setMetaMany([
+    ['COMUNAS_JSON', JSON.stringify(comunasList)],
+    ['REGION_BY_COMUNA_JSON', JSON.stringify(regionByComuna)],
+    ['REGIONES_JSON', JSON.stringify(regionesList)]
+  ]);
+}
+
+async function insertBatch_(client, batch) {
+  if (!batch.length) return;
+  var values = [];
+  var placeholders = [];
+  var p = 1;
+  batch.forEach(function (row) {
+    placeholders.push('($' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ',$' + p++ + ')');
+    values.push(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]);
+  });
+  var sql = 'INSERT INTO data_rows (base, rut, nombre, comuna, region, direccion, tipo, fch_ingreso, raw) VALUES ' + placeholders.join(',');
+  await client.query(sql, values);
+}
+
+/**
+ * Interpreta el valor de FCH_INGRESO como fecha, soportando:
+ * - Fecha real de Excel (ya viene como string ISO tras normalizeCell_)
+ * - Texto en formato dd-mm-yyyy o dd/mm/yyyy (formato chileno)
+ * Devuelve una fecha 'yyyy-mm-dd' o null si no se pudo interpretar.
+ */
+function parseFechaIngreso_(v) {
+  if (!v) return null;
+  var s = String(v).trim();
+  if (!s) return null;
+
+  // Formato dd-mm-yyyy o dd/mm/yyyy (chileno) -- se revisa primero porque
+  // new Date() interpretaría mal "05-07-2026" (lo leería como mes-día).
+  var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (m) {
+    var dd = m[1].padStart(2, '0');
+    var mm = m[2].padStart(2, '0');
+    return m[3] + '-' + mm + '-' + dd;
+  }
+
+  // Fecha ISO (ya sea "2026-07-05" o "2026-07-05T00:00:00.000Z")
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+function normalizeCell_(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    if (v.text !== undefined) return v.text; // rich text
+    if (v.result !== undefined) return v.result; // fórmula
+    if (v instanceof Date) return v.toISOString();
+    return String(v);
+  }
+  return v;
+}
+
+module.exports = { processUploadedFile, getStatus, isProcessing, GX1_DIAS_MINIMOS_DEFAULT };

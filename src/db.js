@@ -51,6 +51,7 @@ async function initSchema() {
 
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS fecha_desde DATE;`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS fecha_hasta DATE;`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS distribuidores JSONB NOT NULL DEFAULT '[]';`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS data_rows (
@@ -62,6 +63,7 @@ async function initSchema() {
       region TEXT,
       direccion TEXT,
       tipo TEXT,
+      distribuidor TEXT,
       fch_ingreso DATE,
       raw JSONB NOT NULL
     );
@@ -69,12 +71,28 @@ async function initSchema() {
   await query(`ALTER TABLE data_rows ADD COLUMN IF NOT EXISTS region TEXT;`);
   await query(`ALTER TABLE data_rows ADD COLUMN IF NOT EXISTS fch_ingreso DATE;`);
   await query(`ALTER TABLE data_rows ADD COLUMN IF NOT EXISTS base TEXT NOT NULL DEFAULT 'GX2';`);
+  await query(`ALTER TABLE data_rows ADD COLUMN IF NOT EXISTS distribuidor TEXT;`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_comuna ON data_rows (comuna);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_tipo ON data_rows (tipo);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_rut ON data_rows (rut);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_rut_direccion ON data_rows (rut, direccion);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_fch_ingreso ON data_rows (fch_ingreso);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_base ON data_rows (base);`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_data_rows_distribuidor ON data_rows (distribuidor);`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bodega_items (
+      id BIGSERIAL PRIMARY KEY,
+      base TEXT NOT NULL,
+      cod_deposito TEXT,
+      deposito TEXT,
+      cod_articulo TEXT,
+      articulo TEXT,
+      stock NUMERIC
+    );
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_bodega_base ON bodega_items (base);`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_bodega_deposito ON bodega_items (deposito);`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS meta (

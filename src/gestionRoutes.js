@@ -2,9 +2,15 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const db = require('./db');
 const auth = require('./auth');
+const processFile = require('./processFile');
 
 const router = express.Router();
 router.use(auth.requireAuth);
+
+async function getGx1DiasMinimos_() {
+  var v = await db.getMeta('GX1_DIAS_MINIMOS');
+  return v && !isNaN(Number(v)) ? Number(v) : processFile.GX1_DIAS_MINIMOS_DEFAULT;
+}
 
 async function getTiposPermitidos_() {
   var gx1 = await db.getMeta('TIPOS_PERMITIDOS_GX1_JSON');
@@ -44,6 +50,11 @@ async function buildUserScope_(user, sistemaFilter) {
   if (comunas.length) { conditions.push('comuna = ANY($' + p++ + ')'); params.push(comunas); }
   if (user.rol !== 'ADMIN' && user.fecha_desde) { conditions.push('fch_ingreso >= $' + p++); params.push(user.fecha_desde); }
   if (user.rol !== 'ADMIN' && user.fecha_hasta) { conditions.push('fch_ingreso <= $' + p++); params.push(user.fecha_hasta); }
+  if (user.rol === 'USER') {
+    var dias = await getGx1DiasMinimos_();
+    conditions.push("(base <> 'GX1' OR (CURRENT_DATE - fch_ingreso) > $" + p++ + ')');
+    params.push(dias);
+  }
   if (sistemaFilter === 'GX1' || sistemaFilter === 'GX2') { conditions.push('base = $' + p++); params.push(sistemaFilter); }
 
   var tiposPermitidos = await getTiposPermitidos_();

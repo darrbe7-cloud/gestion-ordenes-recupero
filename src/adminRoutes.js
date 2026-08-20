@@ -7,7 +7,7 @@ const router = express.Router();
 router.use(auth.requireAdmin);
 
 function normalizeRol_(r) {
-  if (r === 'ADMIN' || r === 'UPLOADER') return r;
+  if (['ADMIN', 'UPLOADER', 'VENTA_GX1', 'VENTA_GX2'].indexOf(r) !== -1) return r;
   return 'USER';
 }
 
@@ -15,7 +15,7 @@ function normalizeRol_(r) {
 // USUARIOS
 // ---------------------------------------------------------
 router.get('/users', async function (req, res) {
-  var result = await db.query('SELECT id, username, rol, comunas, activo, created_at, fecha_desde, fecha_hasta FROM users ORDER BY username');
+  var result = await db.query('SELECT id, username, rol, comunas, distribuidores, activo, created_at, fecha_desde, fecha_hasta FROM users ORDER BY username');
   res.json(result.rows);
 });
 
@@ -27,9 +27,9 @@ router.post('/users', async function (req, res) {
   try {
     var hash = bcrypt.hashSync(b.password, 10);
     var result = await db.query(
-      `INSERT INTO users (username, password_hash, rol, comunas, tipos, activo, fecha_desde, fecha_hasta)
-       VALUES ($1, $2, $3, $4, '[]', true, $5, $6) RETURNING id`,
-      [b.username.trim(), hash, normalizeRol_(b.rol), JSON.stringify(b.comunas || []), b.fechaDesde || null, b.fechaHasta || null]
+      `INSERT INTO users (username, password_hash, rol, comunas, tipos, distribuidores, activo, fecha_desde, fecha_hasta)
+       VALUES ($1, $2, $3, $4, '[]', $5, true, $6, $7) RETURNING id`,
+      [b.username.trim(), hash, normalizeRol_(b.rol), JSON.stringify(b.comunas || []), JSON.stringify(b.distribuidores || []), b.fechaDesde || null, b.fechaHasta || null]
     );
     res.json({ ok: true, id: result.rows[0].id });
   } catch (e) {
@@ -48,6 +48,7 @@ router.put('/users/:id', async function (req, res) {
 
   if (b.rol) { fields.push('rol = $' + p++); values.push(normalizeRol_(b.rol)); }
   if (b.comunas !== undefined) { fields.push('comunas = $' + p++); values.push(JSON.stringify(b.comunas || [])); }
+  if (b.distribuidores !== undefined) { fields.push('distribuidores = $' + p++); values.push(JSON.stringify(b.distribuidores || [])); }
   if (b.activo !== undefined) { fields.push('activo = $' + p++); values.push(b.activo === true); }
   if (b.fechaDesde !== undefined) { fields.push('fecha_desde = $' + p++); values.push(b.fechaDesde || null); }
   if (b.fechaHasta !== undefined) { fields.push('fecha_hasta = $' + p++); values.push(b.fechaHasta || null); }
@@ -77,7 +78,7 @@ router.delete('/users/:id', async function (req, res) {
  * OJO: incluye el hash de la contraseña (no la clave en texto plano), sirve para restaurar tal cual.
  */
 router.get('/users/backup/download', async function (req, res) {
-  var result = await db.query('SELECT username, password_hash, rol, comunas, activo, fecha_desde, fecha_hasta FROM users');
+  var result = await db.query('SELECT username, password_hash, rol, comunas, distribuidores, activo, fecha_desde, fecha_hasta FROM users');
   res.setHeader('Content-Disposition', 'attachment; filename="respaldo_usuarios.json"');
   res.json(result.rows);
 });
@@ -89,13 +90,13 @@ router.post('/users/backup/restore', async function (req, res) {
   for (var i = 0; i < users.length; i++) {
     var u = users[i];
     await db.query(
-      `INSERT INTO users (username, password_hash, rol, comunas, tipos, activo, fecha_desde, fecha_hasta)
-       VALUES ($1, $2, $3, $4, '[]', $5, $6, $7)
+      `INSERT INTO users (username, password_hash, rol, comunas, tipos, distribuidores, activo, fecha_desde, fecha_hasta)
+       VALUES ($1, $2, $3, $4, '[]', $5, $6, $7, $8)
        ON CONFLICT (username) DO UPDATE SET
          password_hash = EXCLUDED.password_hash, rol = EXCLUDED.rol,
-         comunas = EXCLUDED.comunas, activo = EXCLUDED.activo,
+         comunas = EXCLUDED.comunas, distribuidores = EXCLUDED.distribuidores, activo = EXCLUDED.activo,
          fecha_desde = EXCLUDED.fecha_desde, fecha_hasta = EXCLUDED.fecha_hasta`,
-      [u.username, u.password_hash, normalizeRol_(u.rol), JSON.stringify(u.comunas || []), u.activo !== false,
+      [u.username, u.password_hash, normalizeRol_(u.rol), JSON.stringify(u.comunas || []), JSON.stringify(u.distribuidores || []), u.activo !== false,
        u.fecha_desde || null, u.fecha_hasta || null]
     );
     count++;
@@ -122,12 +123,35 @@ router.get('/meta', async function (req, res) {
     };
   }
 
+  async function bodegaStats(base) {
+    return {
+      lastUploadDate: await db.getMeta('LAST_UPLOAD_DATE_BODEGA_' + base) || '',
+      lastUploadFilename: await db.getMeta('LAST_UPLOAD_FILENAME_BODEGA_' + base) || '',
+      totalRows: await db.getMeta('TOTAL_ROWS_BODEGA_' + base) || '0'
+    };
+  }
+
   res.json({
     comunas: comunas ? JSON.parse(comunas) : [],
     regionByComuna: regionByComuna ? JSON.parse(regionByComuna) : {},
     regiones: regiones ? JSON.parse(regiones) : [],
     gx1: await statsPorBase('GX1'),
-    gx2: await statsPorBase('GX2')
+    gx2: await statsPorBase('GX2'),
+    bodegaGx1: await bodegaStats('GX1'),
+    bodegaGx2: await bodegaStats('GX2')
+  });
+});
+
+/**
+ * Lista de distribuidores distintos por base (para armar la asignación al
+ * crear/editar usuarios de venta).
+ */
+router.get('/distribuidores', async function (req, res) {
+  var gx1 = await db.query("SELECT DISTINCT distribuidor FROM data_rows WHERE base = 'GX1' AND distribuidor IS NOT NULL AND distribuidor <> '' ORDER BY distribuidor");
+  var gx2 = await db.query("SELECT DISTINCT distribuidor FROM data_rows WHERE base = 'GX2' AND distribuidor IS NOT NULL AND distribuidor <> '' ORDER BY distribuidor");
+  res.json({
+    gx1: gx1.rows.map(function (r) { return r.distribuidor; }),
+    gx2: gx2.rows.map(function (r) { return r.distribuidor; })
   });
 });
 
@@ -163,6 +187,90 @@ router.put('/tipos-permitidos/:base', async function (req, res) {
   var tipos = Array.isArray(req.body.tipos) ? req.body.tipos : [];
   await db.setMeta('TIPOS_PERMITIDOS_' + base + '_JSON', JSON.stringify(tipos));
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------
+// BODEGA: depósitos visibles (global, para todos los usuarios de venta)
+// ---------------------------------------------------------
+router.get('/depositos', async function (req, res) {
+  var todos = await db.getMeta('DEPOSITOS_JSON');
+  var visibles = await db.getMeta('DEPOSITOS_VISIBLES_JSON');
+  res.json({
+    todos: todos ? JSON.parse(todos) : [],
+    visibles: visibles ? JSON.parse(visibles) : []
+  });
+});
+
+router.put('/depositos-visibles', async function (req, res) {
+  var depositos = Array.isArray(req.body.depositos) ? req.body.depositos : [];
+  await db.setMeta('DEPOSITOS_VISIBLES_JSON', JSON.stringify(depositos));
+  res.json({ ok: true });
+});
+
+/**
+ * Vista de bodega para el admin: ve todo, sin restricción de depósito.
+ */
+router.get('/bodega', async function (req, res) {
+  var page = parseInt(req.query.page || '0', 10);
+  var pageSize = Math.min(parseInt(req.query.pageSize || '100', 10), 500);
+  var search = req.query.search || '';
+  var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
+
+  var conditions = [];
+  var params = [];
+  var p = 1;
+  if (base) { conditions.push('base = $' + p++); params.push(base); }
+  if (search) {
+    conditions.push('(articulo ILIKE $' + p + ' OR cod_articulo ILIKE $' + p + ' OR deposito ILIKE $' + p + ')');
+    params.push('%' + search + '%');
+    p++;
+  }
+  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  var countResult = await db.query('SELECT COUNT(*) FROM bodega_items ' + where, params);
+  var total = Number(countResult.rows[0].count);
+
+  var params2 = params.slice();
+  params2.push(pageSize, page * pageSize);
+  var result = await db.query(
+    'SELECT base, cod_deposito, deposito, cod_articulo, articulo, stock FROM bodega_items ' + where +
+    ' ORDER BY deposito, articulo LIMIT $' + p + ' OFFSET $' + (p + 1),
+    params2
+  );
+
+  res.json({ total: total, page: page, pageSize: pageSize, rows: result.rows });
+});
+
+router.get('/bodega/export', async function (req, res) {
+  var search = req.query.search || '';
+  var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
+  var conditions = [];
+  var params = [];
+  var p = 1;
+  if (base) { conditions.push('base = $' + p++); params.push(base); }
+  if (search) {
+    conditions.push('(articulo ILIKE $' + p + ' OR cod_articulo ILIKE $' + p + ' OR deposito ILIKE $' + p + ')');
+    params.push('%' + search + '%');
+    p++;
+  }
+  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  var result = await db.query('SELECT base, cod_deposito, deposito, cod_articulo, articulo, stock FROM bodega_items ' + where + ' ORDER BY deposito, articulo', params);
+  if (!result.rows.length) return res.status(404).json({ ok: false, error: 'No hay filas de bodega para exportar.' });
+
+  var filename = 'bodega_admin_' + (base || 'todo') + '_' + Date.now() + '.xlsx';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+
+  var ExcelJS2 = require('exceljs');
+  var workbook = new ExcelJS2.stream.xlsx.WorkbookWriter({ stream: res });
+  var sheet = workbook.addWorksheet('Bodega');
+  sheet.addRow(['SISTEMA', 'COD_DEPOSITO', 'DEPOSITO', 'COD_ARTICULO', 'ARTICULO', 'STOCK']).commit();
+  result.rows.forEach(function (r) {
+    sheet.addRow([r.base, r.cod_deposito, r.deposito, r.cod_articulo, r.articulo, r.stock]).commit();
+  });
+  sheet.commit();
+  await workbook.commit();
 });
 
 // ---------------------------------------------------------

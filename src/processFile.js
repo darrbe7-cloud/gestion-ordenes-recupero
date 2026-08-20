@@ -203,12 +203,23 @@ async function insertBatch_(client, batch) {
 
 /**
  * Interpreta el valor de FCH_INGRESO como fecha, soportando:
- * - Fecha real de Excel (ya viene como string ISO tras normalizeCell_)
+ * - Fecha real de Excel ya convertida a objeto Date (llega como string ISO tras normalizeCell_)
+ * - Número crudo de Excel (fecha "serial", días desde 1899-12-30) -- pasa esto
+ *   cuando la celda no está formateada como fecha en el archivo original
  * - Texto en formato dd-mm-yyyy o dd/mm/yyyy (formato chileno)
- * Devuelve una fecha 'yyyy-mm-dd' o null si no se pudo interpretar.
+ * Devuelve una fecha 'yyyy-mm-dd' o null si no se pudo interpretar o el
+ * resultado no es una fecha plausible (para evitar valores absurdos como
+ * "año 46203" que rompen la base de datos).
  */
 function parseFechaIngreso_(v) {
-  if (!v) return null;
+  if (v === null || v === undefined || v === '') return null;
+
+  // Número crudo de Excel (fecha serial)
+  if (typeof v === 'number' && isFinite(v)) {
+    var excelEpochMs = Date.UTC(1899, 11, 30);
+    return validarYFormatearFecha_(new Date(excelEpochMs + v * 86400000));
+  }
+
   var s = String(v).trim();
   if (!s) return null;
 
@@ -218,16 +229,18 @@ function parseFechaIngreso_(v) {
   if (m) {
     var dd = m[1].padStart(2, '0');
     var mm = m[2].padStart(2, '0');
-    return m[3] + '-' + mm + '-' + dd;
+    return validarYFormatearFecha_(new Date(m[3] + '-' + mm + '-' + dd + 'T00:00:00Z'));
   }
 
   // Fecha ISO (ya sea "2026-07-05" o "2026-07-05T00:00:00.000Z")
-  var d = new Date(s);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
-  }
+  return validarYFormatearFecha_(new Date(s));
+}
 
-  return null;
+function validarYFormatearFecha_(d) {
+  if (isNaN(d.getTime())) return null;
+  var year = d.getUTCFullYear();
+  if (year < 1990 || year > 2100) return null; // fecha no plausible, se descarta en vez de romper la base
+  return d.toISOString().slice(0, 10);
 }
 
 function normalizeCell_(v) {

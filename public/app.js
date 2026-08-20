@@ -104,15 +104,19 @@ function resetAppView() {
   document.getElementById('adminTabs').classList.add('hidden');
   document.getElementById('userDashboard').classList.add('hidden');
   document.getElementById('uploaderDashboard').classList.add('hidden');
+  document.getElementById('ventaDashboard').classList.add('hidden');
 
   document.getElementById('usersTableBody').innerHTML = '';
   document.getElementById('dataCardAdmin').innerHTML = '';
   document.getElementById('dataCardUser').innerHTML = '';
   document.getElementById('metaStatsGx1').innerHTML = '';
   document.getElementById('metaStatsGx2').innerHTML = '';
+  document.getElementById('metaStatsBodegaGx1').innerHTML = '';
+  document.getElementById('metaStatsBodegaGx2').innerHTML = '';
   document.getElementById('processProgress').innerHTML = '';
   document.getElementById('processProgressUploader').innerHTML = '';
   document.getElementById('uploaderHistory').innerHTML = '';
+  document.getElementById('uploaderHistoryBodega').innerHTML = '';
   document.getElementById('motivosTableBody').innerHTML = '';
   document.getElementById('gestionGlobalTableBody').innerHTML = '';
   document.getElementById('cardSinGestionar').innerHTML = '';
@@ -121,6 +125,10 @@ function resetAppView() {
   document.getElementById('userUploadDatesCard').innerHTML = '';
   document.getElementById('modelosGx1List').innerHTML = '';
   document.getElementById('modelosGx2List').innerHTML = '';
+  document.getElementById('depositosVisiblesList').innerHTML = '';
+  document.getElementById('bodegaCardAdmin').innerHTML = '';
+  document.getElementById('ventaOrdenesCard').innerHTML = '';
+  document.getElementById('ventaBodegaCard').innerHTML = '';
 
   if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
   if (processPollTimerUploader) { clearInterval(processPollTimerUploader); processPollTimerUploader = null; }
@@ -131,7 +139,8 @@ function onLoginSuccess() {
   document.getElementById('view-login').classList.add('hidden');
   document.getElementById('view-app').classList.remove('hidden');
 
-  var rolLabel = STATE.rol === 'ADMIN' ? 'Administrador' : (STATE.rol === 'UPLOADER' ? 'Carga de archivos' : 'Usuario');
+  var rolLabels = { ADMIN: 'Administrador', UPLOADER: 'Carga de archivos', VENTA_GX1: 'Venta e instalación GX1', VENTA_GX2: 'Venta e instalación GX2' };
+  var rolLabel = rolLabels[STATE.rol] || 'Usuario';
   document.getElementById('topbarUser').textContent = STATE.username + ' (' + rolLabel + ')';
 
   if (STATE.rol === 'ADMIN') {
@@ -143,6 +152,9 @@ function onLoginSuccess() {
     document.getElementById('uploaderDashboard').classList.remove('hidden');
     loadUploaderHistory();
     checkResumeProcessPollingUploader();
+  } else if (STATE.rol === 'VENTA_GX1' || STATE.rol === 'VENTA_GX2') {
+    document.getElementById('ventaDashboard').classList.remove('hidden');
+    switchVentaTab('v-ordenes');
   } else {
     document.getElementById('userDashboard').classList.remove('hidden');
     loadUserUploadDates();
@@ -220,6 +232,7 @@ function switchTab(tabId) {
 
   if (tabId === 'tab-users') loadUsers();
   if (tabId === 'tab-data') { renderDataView('dataCardAdmin', true); loadDataTable('dataCardAdmin'); }
+  if (tabId === 'tab-bodega') { loadDepositosVisibles(); renderBodegaView('bodegaCardAdmin', true); loadBodegaTable('bodegaCardAdmin', true); }
   if (tabId === 'tab-upload') loadMetaStats();
   if (tabId === 'tab-modelos') loadModelosPermitidos();
   if (tabId === 'tab-motivos') loadMotivos();
@@ -234,12 +247,15 @@ var processPollTimer = null;
 async function uploadFile() {
   var fileInput = document.getElementById('fileInput');
   var base = document.getElementById('uploadBaseSelect').value;
+  var tipo = document.getElementById('uploadTipoSelect').value;
   if (!fileInput.files.length) { alert('Selecciona un archivo .xlsx primero.'); return; }
-  if (!confirm('Esto reemplazará TODA la base ' + base + ' actual con el contenido de este archivo (ya filtrado). El proceso corre en segundo plano. ¿Continuar?')) return;
+  var tipoTexto = tipo === 'BODEGA' ? 'de bodega' : 'de órdenes';
+  if (!confirm('Esto reemplazará TODA la base ' + tipoTexto + ' ' + base + ' actual con el contenido de este archivo. El proceso corre en segundo plano. ¿Continuar?')) return;
 
   var formData = new FormData();
   formData.append('file', fileInput.files[0]);
   formData.append('base', base);
+  formData.append('tipo', tipo);
 
   try {
     var res = await api('/upload', { method: 'POST', body: formData });
@@ -320,6 +336,14 @@ async function loadMetaStats() {
     STATE.metaLists = { comunas: meta.comunas, regionByComuna: meta.regionByComuna, regiones: meta.regiones, tipos: tiposUnicos };
     renderStatsBase_('metaStatsGx1', meta.gx1);
     renderStatsBase_('metaStatsGx2', meta.gx2);
+    document.getElementById('metaStatsBodegaGx1').innerHTML =
+      statBox(meta.bodegaGx1.totalRows, 'Ítems cargados') +
+      statBox(meta.bodegaGx1.lastUploadFilename || '—', 'Último archivo') +
+      statBox(meta.bodegaGx1.lastUploadDate ? new Date(meta.bodegaGx1.lastUploadDate).toLocaleString() : '—', 'Fecha de última carga');
+    document.getElementById('metaStatsBodegaGx2').innerHTML =
+      statBox(meta.bodegaGx2.totalRows, 'Ítems cargados') +
+      statBox(meta.bodegaGx2.lastUploadFilename || '—', 'Último archivo') +
+      statBox(meta.bodegaGx2.lastUploadDate ? new Date(meta.bodegaGx2.lastUploadDate).toLocaleString() : '—', 'Fecha de última carga');
   } catch (e) {
     document.getElementById('metaStatsGx1').innerHTML = '<p class="error-text">' + e.message + '</p>';
   }
@@ -334,7 +358,7 @@ async function guardarGx1DiasMinimos() {
   try {
     var res = await api('/admin/config/gx1-dias-minimos', { method: 'PUT', body: JSON.stringify({ dias: dias }) });
     if (!res.ok) { alert('Error: ' + res.error); return; }
-    alert('Guardado. GX1 ahora exigirá más de ' + dias + ' días desde FCH_INGRESO en la próxima carga.');
+    alert('Guardado. Ahora se usarán ' + dias + ' días como corte entre venta y terreno para GX1.');
   } catch (e) {
     alert('Error: ' + e.message);
   }
@@ -361,12 +385,14 @@ var processPollTimerUploader = null;
 async function uploadFileUploader() {
   var fileInput = document.getElementById('fileInputUploader');
   var base = document.getElementById('uploadBaseSelectUploader').value;
+  var tipo = document.getElementById('uploadTipoSelectUploader').value;
   if (!fileInput.files.length) { alert('Selecciona un archivo .xlsx primero.'); return; }
   if (!confirm('Esto reemplazará TODA la base ' + base + ' actual con el contenido de este archivo. ¿Continuar?')) return;
 
   var formData = new FormData();
   formData.append('file', fileInput.files[0]);
   formData.append('base', base);
+  formData.append('tipo', tipo);
 
   try {
     var res = await api('/upload', { method: 'POST', body: formData });
@@ -413,6 +439,7 @@ async function checkResumeProcessPollingUploader() {
 
 async function loadUploaderHistory() {
   var el = document.getElementById('uploaderHistory');
+  var elBodega = document.getElementById('uploaderHistoryBodega');
   try {
     var hist = await api('/upload/history');
     el.innerHTML =
@@ -420,6 +447,11 @@ async function loadUploaderHistory() {
       statBox(hist.gx1.archivo || '—', 'GX1 — archivo') +
       statBox(hist.gx2.fecha ? new Date(hist.gx2.fecha).toLocaleString() : '—', 'GX2 — última subida') +
       statBox(hist.gx2.archivo || '—', 'GX2 — archivo');
+    elBodega.innerHTML =
+      statBox(hist.bodegaGx1.fecha ? new Date(hist.bodegaGx1.fecha).toLocaleString() : '—', 'GX1 — última subida') +
+      statBox(hist.bodegaGx1.archivo || '—', 'GX1 — archivo') +
+      statBox(hist.bodegaGx2.fecha ? new Date(hist.bodegaGx2.fecha).toLocaleString() : '—', 'GX2 — última subida') +
+      statBox(hist.bodegaGx2.archivo || '—', 'GX2 — archivo');
   } catch (e) {
     el.innerHTML = '<p class="error-text">' + e.message + '</p>';
   }
@@ -539,7 +571,26 @@ async function restoreUsersBackup(file) {
 // ---- Modal crear/editar usuario ----
 function onUserModalRolChange() {
   var rol = document.getElementById('userModalRol').value;
-  document.getElementById('userModalTerritorioWrap').classList.toggle('hidden', rol === 'UPLOADER' || rol === 'ADMIN');
+  document.getElementById('userModalTerritorioWrap').classList.toggle('hidden', rol !== 'USER');
+  var esVenta = rol === 'VENTA_GX1' || rol === 'VENTA_GX2';
+  document.getElementById('userModalDistribuidoresWrap').classList.toggle('hidden', !esVenta);
+  if (esVenta) cargarDistribuidoresParaModal_(rol);
+}
+
+async function cargarDistribuidoresParaModal_(rol) {
+  try {
+    var dist = await api('/admin/distribuidores');
+    var lista = rol === 'VENTA_GX1' ? dist.gx1 : dist.gx2;
+    var idParam = document.getElementById('userModalId').value;
+    var seleccionados = [];
+    if (idParam) {
+      var u = STATE.usersCache.filter(function (x) { return x.id === idParam; })[0];
+      if (u) seleccionados = u.distribuidores || [];
+    }
+    renderCheckboxList('distribuidoresCheckboxList', lista, seleccionados);
+  } catch (e) {
+    document.getElementById('distribuidoresCheckboxList').innerHTML = '<p class="error-text">' + e.message + '</p>';
+  }
 }
 
 async function openUserModal(userId) {
@@ -552,6 +603,7 @@ async function openUserModal(userId) {
   document.getElementById('userModalUsername').disabled = false;
   document.getElementById('userModalMesDesde').value = '';
   document.getElementById('userModalMesHasta').value = '';
+  document.getElementById('distribuidoresCheckboxList').innerHTML = '';
 
   if (!STATE.metaLists.comunas.length) {
     try {
@@ -597,6 +649,7 @@ async function saveUserModal() {
   var rol = document.getElementById('userModalRol').value;
   var activo = document.getElementById('userModalActivo').checked;
   var comunas = getCheckedValues('comunasCheckboxList');
+  var distribuidores = getCheckedValues('distribuidoresCheckboxList');
   var mesDesde = document.getElementById('userModalMesDesde').value;
   var mesHasta = document.getElementById('userModalMesHasta').value;
   var fechaDesde = mesDesde ? mesDesde + '-01' : null;
@@ -609,7 +662,7 @@ async function saveUserModal() {
     if (id) {
       res = await api('/admin/users/' + id, {
         method: 'PUT',
-        body: JSON.stringify({ password: password || undefined, rol: rol, comunas: comunas, activo: activo, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
+        body: JSON.stringify({ password: password || undefined, rol: rol, comunas: comunas, distribuidores: distribuidores, activo: activo, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
       });
     } else {
       if (!username || !password) {
@@ -619,7 +672,7 @@ async function saveUserModal() {
       }
       res = await api('/admin/users', {
         method: 'POST',
-        body: JSON.stringify({ username: username, password: password, rol: rol, comunas: comunas, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
+        body: JSON.stringify({ username: username, password: password, rol: rol, comunas: comunas, distribuidores: distribuidores, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
       });
     }
     if (!res.ok) { errEl.textContent = res.error; errEl.classList.remove('hidden'); return; }
@@ -1252,4 +1305,198 @@ function downloadGestionGlobal() {
   var base = document.getElementById('gestionSistemaFilter').value;
   var qs = '?estado=' + encodeURIComponent(estado) + '&base=' + encodeURIComponent(base);
   downloadFileFromApi_('/api/admin/gestiones/export' + qs, null, 'gestion_completa.xlsx');
+}
+
+// ---------------------------------------------------------
+// ADMIN: BODEGA (depósitos visibles + tabla de inventario)
+// ---------------------------------------------------------
+async function loadDepositosVisibles() {
+  try {
+    var data = await api('/admin/depositos');
+    renderCheckboxList('depositosVisiblesList', data.todos, data.visibles);
+  } catch (e) {
+    document.getElementById('depositosVisiblesList').innerHTML = '<p class="error-text">' + e.message + '</p>';
+  }
+}
+
+async function guardarDepositosVisibles() {
+  var depositos = getCheckedValues('depositosVisiblesList');
+  try {
+    var res = await api('/admin/depositos-visibles', { method: 'PUT', body: JSON.stringify({ depositos: depositos }) });
+    if (!res.ok) { alert('Error: ' + res.error); return; }
+    alert('Guardado. ' + (depositos.length ? depositos.length + ' depósito(s) visibles para venta.' : 'Sin restricción — todos los depósitos visibles para venta.'));
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+/**
+ * Vista de tabla de bodega, reutilizada por el admin (sin restricción de
+ * depósito) y por el equipo de venta (ya restringido en el servidor).
+ */
+var BODEGA_STATE = { page: 0, pageSize: 100, search: '', base: '' };
+
+function renderBodegaView(cardId, isAdmin) {
+  var card = document.getElementById(cardId);
+  card.innerHTML =
+    '<h2>Material en bodega</h2>' +
+    '<div class="field" style="max-width:220px;">' +
+      '<label>Sistema</label>' +
+      '<select id="bodegaSistemaSelect_' + cardId + '" onchange="onBodegaSistemaChange(\'' + cardId + '\', ' + isAdmin + ')">' +
+        '<option value="">GX1 y GX2</option>' +
+        '<option value="GX1">Solo GX1</option>' +
+        '<option value="GX2">Solo GX2</option>' +
+      '</select>' +
+    '</div>' +
+    '<div class="toolbar">' +
+      '<input type="text" id="bodegaSearchInput_' + cardId + '" placeholder="Buscar por artículo o depósito...">' +
+      '<button class="btn-secondary" onclick="onBodegaSearch(\'' + cardId + '\', ' + isAdmin + ')">Buscar</button>' +
+      '<button class="btn-primary" onclick="downloadBodega(\'' + cardId + '\', ' + isAdmin + ')" id="bodegaDownloadBtn_' + cardId + '">Descargar Excel</button>' +
+    '</div>' +
+    '<table>' +
+      '<thead><tr><th>Sistema</th><th>Depósito</th><th>Cód. Artículo</th><th>Artículo</th><th>Stock</th></tr></thead>' +
+      '<tbody id="bodegaTableBody_' + cardId + '"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>' +
+    '</table>' +
+    '<div class="pagination" id="bodegaPagination_' + cardId + '"></div>';
+}
+
+function onBodegaSistemaChange(cardId, isAdmin) {
+  BODEGA_STATE.base = document.getElementById('bodegaSistemaSelect_' + cardId).value;
+  BODEGA_STATE.page = 0;
+  loadBodegaTable(cardId, isAdmin);
+}
+
+function onBodegaSearch(cardId, isAdmin) {
+  BODEGA_STATE.search = document.getElementById('bodegaSearchInput_' + cardId).value;
+  BODEGA_STATE.page = 0;
+  loadBodegaTable(cardId, isAdmin);
+}
+
+async function loadBodegaTable(cardId, isAdmin) {
+  var tbody = document.getElementById('bodegaTableBody_' + cardId);
+  tbody.innerHTML = '<tr><td colspan="5" class="muted">Cargando...</td></tr>';
+  try {
+    var qs = '?page=' + BODEGA_STATE.page + '&pageSize=' + BODEGA_STATE.pageSize +
+      '&search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base);
+    var path = isAdmin ? '/admin/bodega' + qs : '/venta/bodega' + qs;
+    var res = await api(path);
+    if (!res.rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Sin resultados.</td></tr>';
+    } else {
+      var html = '';
+      res.rows.forEach(function (r) {
+        html += '<tr><td>' + sistemaBadge_(r.base) + '</td><td>' + escapeHtml(r.deposito) + '</td><td>' +
+                escapeHtml(r.cod_articulo) + '</td><td>' + escapeHtml(r.articulo) + '</td><td>' + r.stock + '</td></tr>';
+      });
+      tbody.innerHTML = html;
+    }
+    renderBodegaPagination_(cardId, res.total, isAdmin);
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="error-text">' + e.message + '</td></tr>';
+  }
+}
+
+function renderBodegaPagination_(cardId, total, isAdmin) {
+  var el = document.getElementById('bodegaPagination_' + cardId);
+  var totalPages = Math.max(1, Math.ceil(total / BODEGA_STATE.pageSize));
+  var currentPage = BODEGA_STATE.page + 1;
+  el.innerHTML =
+    '<span>' + total + ' resultados — página ' + currentPage + ' de ' + totalPages + '</span>' +
+    '<button class="btn-secondary" ' + (BODEGA_STATE.page <= 0 ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', -1, ' + isAdmin + ')">Anterior</button>' +
+    '<button class="btn-secondary" ' + (currentPage >= totalPages ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', 1, ' + isAdmin + ')">Siguiente</button>';
+}
+
+function changeBodegaPage(cardId, delta, isAdmin) {
+  BODEGA_STATE.page = Math.max(0, BODEGA_STATE.page + delta);
+  loadBodegaTable(cardId, isAdmin);
+}
+
+async function downloadBodega(cardId, isAdmin) {
+  var btn = document.getElementById('bodegaDownloadBtn_' + cardId);
+  var qs = '?search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base);
+  var path = isAdmin ? '/api/admin/bodega/export' + qs : '/api/venta/bodega/export' + qs;
+  await downloadFileFromApi_(path, btn, 'bodega.xlsx');
+}
+
+// ---------------------------------------------------------
+// VENTA (GX1 / GX2): órdenes por distribuidor + bodega
+// ---------------------------------------------------------
+function switchVentaTab(tabId) {
+  document.querySelectorAll('#v-ordenes, #v-bodega').forEach(function (el) { el.classList.add('hidden'); });
+  document.querySelectorAll('#ventaTabs .tab-btn').forEach(function (el) { el.classList.remove('active'); });
+  document.getElementById(tabId).classList.remove('hidden');
+  document.querySelector('#ventaTabs .tab-btn[data-vtab="' + tabId + '"]').classList.add('active');
+
+  if (tabId === 'v-ordenes') { renderVentaOrdenesView(); loadVentaOrdenes(); }
+  if (tabId === 'v-bodega') { renderBodegaView('ventaBodegaCard', false); loadBodegaTable('ventaBodegaCard', false); }
+}
+
+var VENTA_ORDENES_STATE = { page: 0, pageSize: 100, search: '' };
+
+function renderVentaOrdenesView() {
+  var card = document.getElementById('ventaOrdenesCard');
+  var tituloBase = STATE.rol === 'VENTA_GX1' ? 'GX1 (órdenes recientes)' : 'GX2';
+  card.innerHTML =
+    '<h2>Órdenes — ' + tituloBase + '</h2>' +
+    '<div class="toolbar">' +
+      '<input type="text" id="ventaOrdenesSearchInput" placeholder="Buscar por RUT, nombre, dirección o comuna...">' +
+      '<button class="btn-secondary" onclick="onVentaOrdenesSearch()">Buscar</button>' +
+      '<button class="btn-primary" onclick="downloadVentaOrdenes()" id="ventaOrdenesDownloadBtn">Descargar Excel</button>' +
+    '</div>' +
+    '<table>' +
+      '<thead><tr><th>RUT</th><th>NOMBRE</th><th>COMUNA</th><th>DIRECCIÓN</th><th>TIPO</th><th>DISTRIBUIDOR</th><th>FCH_INGRESO</th></tr></thead>' +
+      '<tbody id="ventaOrdenesTableBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>' +
+    '</table>' +
+    '<div class="pagination" id="ventaOrdenesPagination"></div>';
+}
+
+function onVentaOrdenesSearch() {
+  VENTA_ORDENES_STATE.search = document.getElementById('ventaOrdenesSearchInput').value;
+  VENTA_ORDENES_STATE.page = 0;
+  loadVentaOrdenes();
+}
+
+async function loadVentaOrdenes() {
+  var tbody = document.getElementById('ventaOrdenesTableBody');
+  tbody.innerHTML = '<tr><td colspan="7" class="muted">Cargando...</td></tr>';
+  try {
+    var qs = '?page=' + VENTA_ORDENES_STATE.page + '&pageSize=' + VENTA_ORDENES_STATE.pageSize + '&search=' + encodeURIComponent(VENTA_ORDENES_STATE.search);
+    var res = await api('/venta/ordenes' + qs);
+    if (res.processing) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">La base se está actualizando en este momento, intenta de nuevo en unos minutos...</td></tr>';
+      document.getElementById('ventaOrdenesPagination').innerHTML = '';
+      return;
+    }
+    if (!res.rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">Sin resultados.</td></tr>';
+    } else {
+      var html = '';
+      res.rows.forEach(function (r) {
+        html += '<tr><td>' + escapeHtml(r.RUT) + '</td><td>' + escapeHtml(r.NOMBRE) + '</td><td>' + escapeHtml(r.COMUNA) + '</td><td>' +
+                escapeHtml(r.DIRECCION) + '</td><td>' + escapeHtml(r.TIPO) + '</td><td>' + escapeHtml(r.DISTRIBUIDOR) + '</td><td>' +
+                (r.FCH_INGRESO ? new Date(r.FCH_INGRESO).toLocaleDateString('es-CL') : '') + '</td></tr>';
+      });
+      tbody.innerHTML = html;
+    }
+    var el = document.getElementById('ventaOrdenesPagination');
+    var totalPages = Math.max(1, Math.ceil(res.total / VENTA_ORDENES_STATE.pageSize));
+    var currentPage = VENTA_ORDENES_STATE.page + 1;
+    el.innerHTML =
+      '<span>' + res.total + ' resultados — página ' + currentPage + ' de ' + totalPages + '</span>' +
+      '<button class="btn-secondary" ' + (VENTA_ORDENES_STATE.page <= 0 ? 'disabled' : '') + ' onclick="changeVentaOrdenesPage(-1)">Anterior</button>' +
+      '<button class="btn-secondary" ' + (currentPage >= totalPages ? 'disabled' : '') + ' onclick="changeVentaOrdenesPage(1)">Siguiente</button>';
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="error-text">' + e.message + '</td></tr>';
+  }
+}
+
+function changeVentaOrdenesPage(delta) {
+  VENTA_ORDENES_STATE.page = Math.max(0, VENTA_ORDENES_STATE.page + delta);
+  loadVentaOrdenes();
+}
+
+async function downloadVentaOrdenes() {
+  var btn = document.getElementById('ventaOrdenesDownloadBtn');
+  var qs = '?search=' + encodeURIComponent(VENTA_ORDENES_STATE.search);
+  await downloadFileFromApi_('/api/venta/ordenes/export' + qs, btn, 'ordenes_venta.xlsx');
 }

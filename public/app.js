@@ -4,14 +4,27 @@
 var STATE = {
   rol: null,
   username: null,
-  metaLists: { comunas: [], tipos: [], regionByComuna: {}, regiones: [] },
+  metaLists: { comunas: [], regionByComuna: {}, regiones: [] },
   dataPage: 0,
   dataPageSize: 100,
   dataSearch: '',
   dataTipoFilter: [],
+  dataMesDesde: '',
+  dataMesHasta: '',
+  dataSistema: '',
   usersCache: [],
   processing: false
 };
+
+function estadoInicial_() {
+  return {
+    rol: null, username: null,
+    metaLists: { comunas: [], regionByComuna: {}, regiones: [] },
+    dataPage: 0, dataPageSize: 100, dataSearch: '', dataTipoFilter: [],
+    dataMesDesde: '', dataMesHasta: '', dataSistema: '',
+    usersCache: [], processing: false
+  };
+}
 
 // ---------------------------------------------------------
 // HELPER: fetch con manejo uniforme de errores/sesión
@@ -81,50 +94,65 @@ async function doLogin() {
 /**
  * Deja la pantalla en blanco/oculta todo lo que dependa de una sesión anterior.
  * Se llama SIEMPRE al iniciar sesión y al cerrar sesión, para que nunca queden
- * restos visuales de la cuenta anterior (por ejemplo, el panel de Administrador
- * quedando visible si el usuario siguiente es un usuario normal).
+ * restos visuales de la cuenta anterior.
  */
 function resetAppView() {
   document.querySelectorAll('.tab-content').forEach(function (el) { el.classList.add('hidden'); });
   document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.remove('active'); });
   document.querySelector('.tab-btn[data-tab="tab-upload"]').classList.add('active');
 
+  document.getElementById('adminTabs').classList.add('hidden');
+  document.getElementById('userDashboard').classList.add('hidden');
+  document.getElementById('uploaderDashboard').classList.add('hidden');
+
   document.getElementById('usersTableBody').innerHTML = '';
   document.getElementById('dataCardAdmin').innerHTML = '';
   document.getElementById('dataCardUser').innerHTML = '';
-  document.getElementById('metaStats').innerHTML = '';
+  document.getElementById('metaStatsGx1').innerHTML = '';
+  document.getElementById('metaStatsGx2').innerHTML = '';
   document.getElementById('processProgress').innerHTML = '';
+  document.getElementById('processProgressUploader').innerHTML = '';
+  document.getElementById('uploaderHistory').innerHTML = '';
   document.getElementById('motivosTableBody').innerHTML = '';
   document.getElementById('gestionGlobalTableBody').innerHTML = '';
   document.getElementById('cardSinGestionar').innerHTML = '';
   document.getElementById('cardAgendados').innerHTML = '';
   document.getElementById('cardGestionados').innerHTML = '';
+  document.getElementById('userUploadDatesCard').innerHTML = '';
+  document.getElementById('modelosGx1List').innerHTML = '';
+  document.getElementById('modelosGx2List').innerHTML = '';
 
   if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
+  if (processPollTimerUploader) { clearInterval(processPollTimerUploader); processPollTimerUploader = null; }
 }
 
 function onLoginSuccess() {
   resetAppView();
   document.getElementById('view-login').classList.add('hidden');
   document.getElementById('view-app').classList.remove('hidden');
-  document.getElementById('topbarUser').textContent = STATE.username + ' (' + (STATE.rol === 'ADMIN' ? 'Administrador' : 'Usuario') + ')';
+
+  var rolLabel = STATE.rol === 'ADMIN' ? 'Administrador' : (STATE.rol === 'UPLOADER' ? 'Carga de archivos' : 'Usuario');
+  document.getElementById('topbarUser').textContent = STATE.username + ' (' + rolLabel + ')';
 
   if (STATE.rol === 'ADMIN') {
     document.getElementById('adminTabs').classList.remove('hidden');
-    document.getElementById('userDashboard').classList.add('hidden');
     switchTab('tab-upload');
     loadMetaStats();
     checkResumeProcessPolling();
+  } else if (STATE.rol === 'UPLOADER') {
+    document.getElementById('uploaderDashboard').classList.remove('hidden');
+    loadUploaderHistory();
+    checkResumeProcessPollingUploader();
   } else {
-    document.getElementById('adminTabs').classList.add('hidden');
     document.getElementById('userDashboard').classList.remove('hidden');
+    loadUserUploadDates();
     switchUserTab('u-sin-gestionar');
   }
 }
 
 async function doLogout(skipCall) {
   if (!skipCall) { try { await api('/logout', { method: 'POST' }); } catch (e) {} }
-  STATE = { rol: null, username: null, metaLists: { comunas: [], tipos: [], regionByComuna: {}, regiones: [] }, dataPage: 0, dataPageSize: 100, dataSearch: '', dataTipoFilter: [], usersCache: [], processing: false };
+  STATE = estadoInicial_();
   resetAppView();
   document.getElementById('view-app').classList.add('hidden');
   document.getElementById('view-login').classList.remove('hidden');
@@ -132,16 +160,14 @@ async function doLogout(skipCall) {
   document.getElementById('loginPassword').value = '';
 }
 
-// Al cargar la página, revisar si ya hay una sesión activa (cookie válida)
 // Al cargar la página, revisar EN SILENCIO si ya hay una sesión activa
 // (cookie válida). Se usa fetch directo (no la función api()) a propósito,
 // para que un "no hay sesión todavía" (lo normal al abrir la página) no
-// dispare el aviso de "tu sesión expiró" — ese aviso debe verse solo cuando
-// una sesión que SÍ estaba activa deja de serlo en medio del uso.
+// dispare el aviso de "tu sesión expiró".
 window.addEventListener('DOMContentLoaded', async function () {
   try {
     var res = await fetch('/api/me', { credentials: 'same-origin' });
-    if (res.status !== 200) return; // no hay sesión, se queda en el login sin avisos
+    if (res.status !== 200) return;
     var data = await res.json();
     if (data.ok) {
       STATE.rol = data.rol;
@@ -188,13 +214,14 @@ async function submitChangePassword() {
 // ---------------------------------------------------------
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(function (el) { el.classList.add('hidden'); });
-  document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.remove('active'); });
+  document.querySelectorAll('#adminTabs .tab-btn').forEach(function (el) { el.classList.remove('active'); });
   document.getElementById(tabId).classList.remove('hidden');
-  document.querySelector('.tab-btn[data-tab="' + tabId + '"]').classList.add('active');
+  document.querySelector('#adminTabs .tab-btn[data-tab="' + tabId + '"]').classList.add('active');
 
   if (tabId === 'tab-users') loadUsers();
   if (tabId === 'tab-data') { renderDataView('dataCardAdmin', true); loadDataTable('dataCardAdmin'); }
   if (tabId === 'tab-upload') loadMetaStats();
+  if (tabId === 'tab-modelos') loadModelosPermitidos();
   if (tabId === 'tab-motivos') loadMotivos();
   if (tabId === 'tab-gestion') loadGestionGlobal();
 }
@@ -206,14 +233,16 @@ var processPollTimer = null;
 
 async function uploadFile() {
   var fileInput = document.getElementById('fileInput');
+  var base = document.getElementById('uploadBaseSelect').value;
   if (!fileInput.files.length) { alert('Selecciona un archivo .xlsx primero.'); return; }
-  if (!confirm('Esto reemplazará TODA la base actual con el contenido de este archivo (ya filtrado). El proceso corre en segundo plano. ¿Continuar?')) return;
+  if (!confirm('Esto reemplazará TODA la base ' + base + ' actual con el contenido de este archivo (ya filtrado). El proceso corre en segundo plano. ¿Continuar?')) return;
 
   var formData = new FormData();
   formData.append('file', fileInput.files[0]);
+  formData.append('base', base);
 
   try {
-    var res = await api('/admin/upload', { method: 'POST', body: formData });
+    var res = await api('/upload', { method: 'POST', body: formData });
     if (!res.ok) { alert('Error al iniciar el procesamiento: ' + res.error); return; }
     STATE.processing = true;
     fileInput.value = '';
@@ -224,7 +253,7 @@ async function uploadFile() {
 }
 
 function startProcessPolling() {
-  renderProcessProgress({ estado: 'EN_PROGRESO', filasLeidas: 0, filasCargadas: 0 });
+  renderProcessProgress({ estado: 'EN_PROGRESO', filasLeidas: 0, filasCargadas: 0 }, 'processProgress');
   if (processPollTimer) clearInterval(processPollTimer);
   processPollTimer = setInterval(pollProcessStatus, 2000);
   pollProcessStatus();
@@ -232,8 +261,8 @@ function startProcessPolling() {
 
 async function pollProcessStatus() {
   try {
-    var status = await api('/admin/process-status');
-    renderProcessProgress(status);
+    var status = await api('/upload/status');
+    renderProcessProgress(status, 'processProgress');
     if (status.estado === 'COMPLETADO') {
       STATE.processing = false;
       clearInterval(processPollTimer);
@@ -252,18 +281,18 @@ async function pollProcessStatus() {
 
 async function checkResumeProcessPolling() {
   try {
-    var status = await api('/admin/process-status');
+    var status = await api('/upload/status');
     if (status.estado === 'EN_PROGRESO') {
       STATE.processing = true;
-      renderProcessProgress(status);
+      renderProcessProgress(status, 'processProgress');
       if (processPollTimer) clearInterval(processPollTimer);
       processPollTimer = setInterval(pollProcessStatus, 2000);
     }
   } catch (e) {}
 }
 
-function renderProcessProgress(status) {
-  var container = document.getElementById('processProgress');
+function renderProcessProgress(status, containerId) {
+  var container = document.getElementById(containerId);
   if (!container) return;
 
   if (!status.estado || status.estado === 'INACTIVO') { container.innerHTML = ''; return; }
@@ -272,37 +301,177 @@ function renderProcessProgress(status) {
     return;
   }
   if (status.estado === 'COMPLETADO') {
-    container.innerHTML = '<div class="card"><h3>Procesamiento completado</h3>' +
+    container.innerHTML = '<div class="card"><h3>Procesamiento completado (' + escapeHtml(status.base || '') + ')</h3>' +
       '<p class="success-text">Archivo: ' + escapeHtml(status.archivo) + ' — ' + status.filasLeidas + ' filas leídas, ' + status.filasCargadas + ' filas cargadas tras el filtro.</p></div>';
     return;
   }
   container.innerHTML =
     '<div class="card">' +
-      '<h3>Procesando ' + escapeHtml(status.archivo || '') + '...</h3>' +
+      '<h3>Procesando ' + escapeHtml(status.base || '') + ': ' + escapeHtml(status.archivo || '') + '...</h3>' +
       '<div class="progress-bar-outer"><div class="progress-bar-inner" style="width: 100%; animation: pulse 1.5s infinite;"></div></div>' +
       '<p class="muted">' + status.filasLeidas + ' filas revisadas, ' + status.filasCargadas + ' cargadas hasta ahora. Puedes seguir usando la página.</p>' +
     '</div>';
 }
 
 async function loadMetaStats() {
-  var el = document.getElementById('metaStats');
   try {
     var meta = await api('/admin/meta');
-    STATE.metaLists = { comunas: meta.comunas, tipos: meta.tipos, regionByComuna: meta.regionByComuna, regiones: meta.regiones };
+    var tiposUnicos = Array.from(new Set((meta.gx1.tipos || []).concat(meta.gx2.tipos || []))).sort();
+    STATE.metaLists = { comunas: meta.comunas, regionByComuna: meta.regionByComuna, regiones: meta.regiones, tipos: tiposUnicos };
+    renderStatsBase_('metaStatsGx1', meta.gx1);
+    renderStatsBase_('metaStatsGx2', meta.gx2);
+  } catch (e) {
+    document.getElementById('metaStatsGx1').innerHTML = '<p class="error-text">' + e.message + '</p>';
+  }
+  try {
+    var config = await api('/admin/config/gx1-dias-minimos');
+    document.getElementById('gx1DiasMinimosInput').value = config.dias;
+  } catch (e) {}
+}
+
+async function guardarGx1DiasMinimos() {
+  var dias = document.getElementById('gx1DiasMinimosInput').value;
+  try {
+    var res = await api('/admin/config/gx1-dias-minimos', { method: 'PUT', body: JSON.stringify({ dias: dias }) });
+    if (!res.ok) { alert('Error: ' + res.error); return; }
+    alert('Guardado. GX1 ahora exigirá más de ' + dias + ' días desde FCH_INGRESO en la próxima carga.');
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function renderStatsBase_(elId, stats) {
+  document.getElementById(elId).innerHTML =
+    statBox(stats.totalRowsFiltered, 'Filas activas (filtradas)') +
+    statBox(stats.totalRowsRaw, 'Filas en el último archivo') +
+    statBox(stats.tipos.length, 'Modelos distintos') +
+    statBox(stats.lastUploadFilename || '—', 'Último archivo procesado') +
+    statBox(stats.lastUploadDate ? new Date(stats.lastUploadDate).toLocaleString() : '—', 'Fecha de última carga');
+}
+
+function statBox(num, label) {
+  return '<div class="stat-box"><div class="num">' + num + '</div><div class="lbl">' + label + '</div></div>';
+}
+
+// ---------------------------------------------------------
+// CARGA DE ARCHIVO (ROL UPLOADER)
+// ---------------------------------------------------------
+var processPollTimerUploader = null;
+
+async function uploadFileUploader() {
+  var fileInput = document.getElementById('fileInputUploader');
+  var base = document.getElementById('uploadBaseSelectUploader').value;
+  if (!fileInput.files.length) { alert('Selecciona un archivo .xlsx primero.'); return; }
+  if (!confirm('Esto reemplazará TODA la base ' + base + ' actual con el contenido de este archivo. ¿Continuar?')) return;
+
+  var formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('base', base);
+
+  try {
+    var res = await api('/upload', { method: 'POST', body: formData });
+    if (!res.ok) { alert('Error al iniciar el procesamiento: ' + res.error); return; }
+    fileInput.value = '';
+    startProcessPollingUploader();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function startProcessPollingUploader() {
+  renderProcessProgress({ estado: 'EN_PROGRESO', filasLeidas: 0, filasCargadas: 0 }, 'processProgressUploader');
+  if (processPollTimerUploader) clearInterval(processPollTimerUploader);
+  processPollTimerUploader = setInterval(pollProcessStatusUploader, 2000);
+  pollProcessStatusUploader();
+}
+
+async function pollProcessStatusUploader() {
+  try {
+    var status = await api('/upload/status');
+    renderProcessProgress(status, 'processProgressUploader');
+    if (status.estado === 'COMPLETADO' || status.estado === 'ERROR') {
+      clearInterval(processPollTimerUploader);
+      processPollTimerUploader = null;
+      loadUploaderHistory();
+    }
+  } catch (e) {
+    clearInterval(processPollTimerUploader);
+    processPollTimerUploader = null;
+  }
+}
+
+async function checkResumeProcessPollingUploader() {
+  try {
+    var status = await api('/upload/status');
+    if (status.estado === 'EN_PROGRESO') {
+      renderProcessProgress(status, 'processProgressUploader');
+      if (processPollTimerUploader) clearInterval(processPollTimerUploader);
+      processPollTimerUploader = setInterval(pollProcessStatusUploader, 2000);
+    }
+  } catch (e) {}
+}
+
+async function loadUploaderHistory() {
+  var el = document.getElementById('uploaderHistory');
+  try {
+    var hist = await api('/upload/history');
     el.innerHTML =
-      statBox(meta.totalRowsFiltered, 'Filas activas (filtradas)') +
-      statBox(meta.totalRowsRaw, 'Filas en el último archivo') +
-      statBox(meta.comunas.length, 'Comunas distintas') +
-      statBox(meta.tipos.length, 'Tipos distintos') +
-      statBox(meta.lastUploadFilename || '—', 'Último archivo procesado') +
-      statBox(meta.lastUploadDate ? new Date(meta.lastUploadDate).toLocaleString() : '—', 'Fecha de última carga');
+      statBox(hist.gx1.fecha ? new Date(hist.gx1.fecha).toLocaleString() : '—', 'GX1 — última subida') +
+      statBox(hist.gx1.archivo || '—', 'GX1 — archivo') +
+      statBox(hist.gx2.fecha ? new Date(hist.gx2.fecha).toLocaleString() : '—', 'GX2 — última subida') +
+      statBox(hist.gx2.archivo || '—', 'GX2 — archivo');
   } catch (e) {
     el.innerHTML = '<p class="error-text">' + e.message + '</p>';
   }
 }
 
-function statBox(num, label) {
-  return '<div class="stat-box"><div class="num">' + num + '</div><div class="lbl">' + label + '</div></div>';
+// ---------------------------------------------------------
+// FECHAS DE SUBIDA (vista de usuario/técnico)
+// ---------------------------------------------------------
+async function loadUserUploadDates() {
+  var el = document.getElementById('userUploadDatesCard');
+  try {
+    var info = await api('/base-info');
+    el.innerHTML =
+      '<span class="muted"><strong>GX1</strong> actualizado: ' + (info.gx1.fecha ? new Date(info.gx1.fecha).toLocaleString() : 'sin datos') + '</span>' +
+      '<span class="muted" style="margin-left:24px;"><strong>GX2</strong> actualizado: ' + (info.gx2.fecha ? new Date(info.gx2.fecha).toLocaleString() : 'sin datos') + '</span>';
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// ---------------------------------------------------------
+// ADMIN: MODELOS PERMITIDOS (global por base)
+// ---------------------------------------------------------
+async function loadModelosPermitidos() {
+  try {
+    if (!STATE.metaLists.comunas.length) {
+      var meta = await api('/admin/meta');
+      STATE.metaLists = { comunas: meta.comunas, regionByComuna: meta.regionByComuna, regiones: meta.regiones };
+      window.__metaGx1Tipos = meta.gx1.tipos;
+      window.__metaGx2Tipos = meta.gx2.tipos;
+    } else {
+      var meta2 = await api('/admin/meta');
+      window.__metaGx1Tipos = meta2.gx1.tipos;
+      window.__metaGx2Tipos = meta2.gx2.tipos;
+    }
+    var permitidos = await api('/admin/tipos-permitidos');
+    renderCheckboxList('modelosGx1List', window.__metaGx1Tipos || [], permitidos.gx1 || []);
+    renderCheckboxList('modelosGx2List', window.__metaGx2Tipos || [], permitidos.gx2 || []);
+  } catch (e) {
+    document.getElementById('modelosGx1List').innerHTML = '<p class="error-text">' + e.message + '</p>';
+  }
+}
+
+async function guardarModelosPermitidos(base) {
+  var containerId = base === 'GX1' ? 'modelosGx1List' : 'modelosGx2List';
+  var tipos = getCheckedValues(containerId);
+  try {
+    await api('/admin/tipos-permitidos/' + base, { method: 'PUT', body: JSON.stringify({ tipos: tipos }) });
+    alert('Guardado. ' + (tipos.length ? tipos.length + ' modelos permitidos para ' + base + '.' : 'Sin restricción — todos los modelos permitidos para ' + base + '.'));
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 // ---------------------------------------------------------
@@ -317,11 +486,16 @@ async function loadUsers() {
     if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No hay usuarios.</td></tr>'; return; }
     var html = '';
     users.forEach(function (u) {
+      var fechasTxt = (u.fecha_desde || u.fecha_hasta)
+        ? (u.fecha_desde ? String(u.fecha_desde).slice(0, 7) : '…') + ' a ' + (u.fecha_hasta ? String(u.fecha_hasta).slice(0, 7) : '…')
+        : 'Sin límite';
+      var rolLabel = u.rol === 'ADMIN' ? 'ADMIN' : (u.rol === 'UPLOADER' ? 'UPLOADER' : 'USER');
+      var rolBadgeClass = u.rol === 'ADMIN' ? 'badge-admin' : (u.rol === 'UPLOADER' ? 'badge-gx1' : 'badge-user');
       html += '<tr>' +
         '<td>' + escapeHtml(u.username) + '</td>' +
-        '<td><span class="badge ' + (u.rol === 'ADMIN' ? 'badge-admin' : 'badge-user') + '">' + u.rol + '</span></td>' +
+        '<td><span class="badge ' + rolBadgeClass + '">' + rolLabel + '</span></td>' +
         '<td>' + (u.comunas.length ? u.comunas.length + ' asignadas' : 'Todas') + '</td>' +
-        '<td>' + (u.tipos.length ? u.tipos.length + ' asignados' : 'Todos') + '</td>' +
+        '<td>' + escapeHtml(fechasTxt) + '</td>' +
         '<td><span class="badge ' + (u.activo ? 'badge-active' : 'badge-inactive') + '">' + (u.activo ? 'Activo' : 'Inactivo') + '</span></td>' +
         '<td class="users-table-actions">' +
           '<button class="btn-secondary" onclick="openUserModal(\'' + u.id + '\')">Editar</button>' +
@@ -363,6 +537,11 @@ async function restoreUsersBackup(file) {
 }
 
 // ---- Modal crear/editar usuario ----
+function onUserModalRolChange() {
+  var rol = document.getElementById('userModalRol').value;
+  document.getElementById('userModalTerritorioWrap').classList.toggle('hidden', rol === 'UPLOADER' || rol === 'ADMIN');
+}
+
 async function openUserModal(userId) {
   document.getElementById('userModalError').classList.add('hidden');
   document.getElementById('userModalId').value = userId || '';
@@ -371,11 +550,13 @@ async function openUserModal(userId) {
   document.getElementById('userModalRol').value = 'USER';
   document.getElementById('userModalActivo').checked = true;
   document.getElementById('userModalUsername').disabled = false;
+  document.getElementById('userModalMesDesde').value = '';
+  document.getElementById('userModalMesHasta').value = '';
 
-  if (!STATE.metaLists.comunas.length && !STATE.metaLists.tipos.length) {
+  if (!STATE.metaLists.comunas.length) {
     try {
       var meta = await api('/admin/meta');
-      STATE.metaLists = { comunas: meta.comunas, tipos: meta.tipos, regionByComuna: meta.regionByComuna, regiones: meta.regiones };
+      STATE.metaLists = { comunas: meta.comunas, regionByComuna: meta.regionByComuna, regiones: meta.regiones };
     } catch (e) {}
   }
 
@@ -385,7 +566,6 @@ async function openUserModal(userId) {
   regionSelect.value = '';
 
   renderCheckboxList('comunasCheckboxList', STATE.metaLists.comunas, []);
-  renderCheckboxList('tiposCheckboxList', STATE.metaLists.tipos, []);
 
   if (userId) {
     var u = STATE.usersCache.filter(function (x) { return x.id === userId; })[0];
@@ -397,12 +577,14 @@ async function openUserModal(userId) {
       document.getElementById('userModalActivo').checked = u.activo;
       document.getElementById('userModalPasswordLabel').textContent = 'Nueva contraseña (dejar en blanco para no cambiar)';
       renderCheckboxList('comunasCheckboxList', STATE.metaLists.comunas, u.comunas);
-      renderCheckboxList('tiposCheckboxList', STATE.metaLists.tipos, u.tipos);
+      document.getElementById('userModalMesDesde').value = u.fecha_desde ? String(u.fecha_desde).slice(0, 7) : '';
+      document.getElementById('userModalMesHasta').value = u.fecha_hasta ? String(u.fecha_hasta).slice(0, 7) : '';
     }
   } else {
     document.getElementById('userModalTitle').textContent = 'Nuevo usuario';
     document.getElementById('userModalPasswordLabel').textContent = 'Contraseña';
   }
+  onUserModalRolChange();
   document.getElementById('userModalOverlay').classList.remove('hidden');
 }
 
@@ -415,7 +597,10 @@ async function saveUserModal() {
   var rol = document.getElementById('userModalRol').value;
   var activo = document.getElementById('userModalActivo').checked;
   var comunas = getCheckedValues('comunasCheckboxList');
-  var tipos = getCheckedValues('tiposCheckboxList');
+  var mesDesde = document.getElementById('userModalMesDesde').value;
+  var mesHasta = document.getElementById('userModalMesHasta').value;
+  var fechaDesde = mesDesde ? mesDesde + '-01' : null;
+  var fechaHasta = mesHasta ? ultimoDiaDeMes_(mesHasta) : null;
   var errEl = document.getElementById('userModalError');
   errEl.classList.add('hidden');
 
@@ -424,7 +609,7 @@ async function saveUserModal() {
     if (id) {
       res = await api('/admin/users/' + id, {
         method: 'PUT',
-        body: JSON.stringify({ password: password || undefined, rol: rol, comunas: comunas, tipos: tipos, activo: activo })
+        body: JSON.stringify({ password: password || undefined, rol: rol, comunas: comunas, activo: activo, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
       });
     } else {
       if (!username || !password) {
@@ -434,7 +619,7 @@ async function saveUserModal() {
       }
       res = await api('/admin/users', {
         method: 'POST',
-        body: JSON.stringify({ username: username, password: password, rol: rol, comunas: comunas, tipos: tipos })
+        body: JSON.stringify({ username: username, password: password, rol: rol, comunas: comunas, fechaDesde: fechaDesde, fechaHasta: fechaHasta })
       });
     }
     if (!res.ok) { errEl.textContent = res.error; errEl.classList.remove('hidden'); return; }
@@ -503,9 +688,22 @@ function getCheckedValues(containerId) {
   return out;
 }
 
+function ultimoDiaDeMes_(mesStr) {
+  var partes = mesStr.split('-');
+  var anio = Number(partes[0]);
+  var mes = Number(partes[1]);
+  var ultimoDia = new Date(anio, mes, 0).getDate();
+  return mesStr + '-' + String(ultimoDia).padStart(2, '0');
+}
+
 // ---------------------------------------------------------
 // TABLA DE DATOS (compartida entre admin "Ver datos" y vista de usuario)
 // ---------------------------------------------------------
+function sistemaBadge_(base) {
+  if (!base) return '';
+  return '<span class="badge ' + (base === 'GX1' ? 'badge-gx1' : 'badge-gx2') + '">' + base + '</span>';
+}
+
 function renderDataView(cardId, isAdmin) {
   var card = document.getElementById(cardId);
   var tipoFilterHtml = '';
@@ -515,28 +713,52 @@ function renderDataView(cardId, isAdmin) {
         '<label>Filtrar por tipo de equipo (opcional)</label>' +
         '<input type="text" class="search-mini" placeholder="Buscar tipo..." oninput="filterCheckboxList(\'adminTipoFilterList\', this.value)">' +
         '<div class="checkbox-list" id="adminTipoFilterList" style="max-height:140px;"></div>' +
-        '<button class="btn-secondary" style="margin-top:8px;" onclick="applyAdminTipoFilter()">Aplicar filtro de tipo</button>' +
+      '</div>' +
+      '<div class="field" style="max-width:320px;">' +
+        '<label>Filtrar por mes de ingreso (opcional)</label>' +
+        '<div class="form-row">' +
+          '<div class="field"><label class="muted" style="font-size:11px;">Desde</label><input type="month" id="adminMesDesdeInput"></div>' +
+          '<div class="field"><label class="muted" style="font-size:11px;">Hasta</label><input type="month" id="adminMesHastaInput"></div>' +
+        '</div>' +
       '</div>';
   }
   card.innerHTML =
     '<h2>' + (isAdmin ? 'Datos (todas las comunas y tipos)' : 'Mis datos asignados') + '</h2>' +
-    (isAdmin ? tipoFilterHtml : '') +
+    '<div class="field" style="max-width:220px;">' +
+      '<label>Sistema</label>' +
+      '<select id="sistemaFilterSelect_' + cardId + '" onchange="onSistemaFilterChange(\'' + cardId + '\')">' +
+        '<option value="">GX1 y GX2</option>' +
+        '<option value="GX1">Solo GX1</option>' +
+        '<option value="GX2">Solo GX2</option>' +
+      '</select>' +
+    '</div>' +
+    (isAdmin ? tipoFilterHtml + '<button class="btn-secondary" style="margin-top:0px; margin-bottom:14px;" onclick="applyAdminTipoFilter()">Aplicar filtros</button>' : '') +
     '<div class="toolbar">' +
       '<input type="text" id="dataSearchInput_' + cardId + '" placeholder="Buscar por RUT, nombre, dirección o comuna...">' +
       '<button class="btn-secondary" onclick="onSearchData(\'' + cardId + '\')">Buscar</button>' +
-      '<button class="btn-primary" onclick="downloadExcel()" id="downloadBtn_' + cardId + '">Descargar Excel</button>' +
+      '<button class="btn-primary" onclick="downloadExcel(\'' + cardId + '\')" id="downloadBtn_' + cardId + '">Descargar Excel</button>' +
     '</div>' +
     '<table>' +
-      '<thead><tr><th>RUT</th><th>NOMBRE</th><th>COMUNA</th><th>DIRECCIÓN</th><th>TIPO</th></tr></thead>' +
-      '<tbody id="dataTableBody_' + cardId + '"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>' +
+      '<thead><tr><th>Sistema</th><th>RUT</th><th>NOMBRE</th><th>COMUNA</th><th>DIRECCIÓN</th><th>TIPO</th></tr></thead>' +
+      '<tbody id="dataTableBody_' + cardId + '"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>' +
     '</table>' +
     '<div class="pagination" id="pagination_' + cardId + '"></div>';
 
-  if (isAdmin) renderCheckboxList('adminTipoFilterList', STATE.metaLists.tipos, []);
+  if (isAdmin) renderCheckboxList('adminTipoFilterList', STATE.metaLists.tipos || [], []);
+}
+
+function onSistemaFilterChange(cardId) {
+  STATE.dataSistema = document.getElementById('sistemaFilterSelect_' + cardId).value;
+  STATE.dataPage = 0;
+  loadDataTable(cardId);
 }
 
 function applyAdminTipoFilter() {
   STATE.dataTipoFilter = getCheckedValues('adminTipoFilterList');
+  var mesDesdeEl = document.getElementById('adminMesDesdeInput');
+  var mesHastaEl = document.getElementById('adminMesHastaInput');
+  STATE.dataMesDesde = mesDesdeEl ? mesDesdeEl.value : '';
+  STATE.dataMesHasta = mesHastaEl ? mesHastaEl.value : '';
   STATE.dataPage = 0;
   loadDataTable('dataCardAdmin');
 }
@@ -549,31 +771,34 @@ function onSearchData(cardId) {
 
 async function loadDataTable(cardId) {
   var tbody = document.getElementById('dataTableBody_' + cardId);
-  tbody.innerHTML = '<tr><td colspan="5" class="muted">Cargando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
     var qs = '?page=' + STATE.dataPage + '&pageSize=' + STATE.dataPageSize +
       '&search=' + encodeURIComponent(STATE.dataSearch) +
-      '&tipoFilter=' + encodeURIComponent(JSON.stringify(STATE.dataTipoFilter));
+      '&tipoFilter=' + encodeURIComponent(JSON.stringify(STATE.dataTipoFilter)) +
+      '&mesDesde=' + encodeURIComponent(STATE.dataMesDesde || '') +
+      '&mesHasta=' + encodeURIComponent(STATE.dataMesHasta || '') +
+      '&sistema=' + encodeURIComponent(STATE.dataSistema || '');
     var res = await api('/data' + qs);
 
     if (res.processing) {
-      tbody.innerHTML = '<tr><td colspan="5" class="muted">La base se está actualizando en este momento, intenta de nuevo en unos minutos...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">La base se está actualizando en este momento, intenta de nuevo en unos minutos...</td></tr>';
       document.getElementById('pagination_' + cardId).innerHTML = '';
       return;
     }
     if (!res.rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="muted">Sin resultados.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">Sin resultados.</td></tr>';
     } else {
       var html = '';
       res.rows.forEach(function (r) {
-        html += '<tr><td>' + escapeHtml(r.RUT) + '</td><td>' + escapeHtml(r.NOMBRE) + '</td><td>' +
+        html += '<tr><td>' + sistemaBadge_(r.SISTEMA) + '</td><td>' + escapeHtml(r.RUT) + '</td><td>' + escapeHtml(r.NOMBRE) + '</td><td>' +
                 escapeHtml(r.COMUNA) + '</td><td>' + escapeHtml(r.DIRECCION) + '</td><td>' + escapeHtml(r.TIPO) + '</td></tr>';
       });
       tbody.innerHTML = html;
     }
     renderPagination(cardId, res.total);
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="5" class="error-text">' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="error-text">' + e.message + '</td></tr>';
   }
 }
 
@@ -592,13 +817,14 @@ function changePage(cardId, delta) {
   loadDataTable(cardId);
 }
 
-async function downloadExcel() {
-  var btnId = STATE.rol === 'ADMIN' ? 'downloadBtn_dataCardAdmin' : 'downloadBtn_dataCardUser';
-  var btn = document.getElementById(btnId);
+async function downloadExcel(cardId) {
+  var btn = document.getElementById('downloadBtn_' + cardId);
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generando...'; }
 
   try {
-    var qs = '?search=' + encodeURIComponent(STATE.dataSearch) + '&tipoFilter=' + encodeURIComponent(JSON.stringify(STATE.dataTipoFilter));
+    var qs = '?search=' + encodeURIComponent(STATE.dataSearch) + '&tipoFilter=' + encodeURIComponent(JSON.stringify(STATE.dataTipoFilter)) +
+      '&mesDesde=' + encodeURIComponent(STATE.dataMesDesde || '') + '&mesHasta=' + encodeURIComponent(STATE.dataMesHasta || '') +
+      '&sistema=' + encodeURIComponent(STATE.dataSistema || '');
     var res = await fetch('/api/data/export' + qs, { credentials: 'same-origin' });
 
     if (!res.ok) {
@@ -612,14 +838,7 @@ async function downloadExcel() {
     var filename = match ? match[1] : 'exportacion.xlsx';
 
     var blob = await res.blob();
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBase64FromResponse_(blob, filename);
   } catch (e) {
     alert('Error: ' + e.message);
   } finally {
@@ -674,6 +893,8 @@ async function downloadFileFromApi_(url, btn, defaultName) {
 // ---------------------------------------------------------
 // PESTAÑAS DEL TÉCNICO (Sin gestionar / Agendados / Gestionados / Base completa)
 // ---------------------------------------------------------
+var TECNICO_SISTEMA_FILTRO = '';
+
 function switchUserTab(tabId) {
   document.querySelectorAll('#u-sin-gestionar, #u-agendados, #u-gestionados, #u-base').forEach(function (el) { el.classList.add('hidden'); });
   document.querySelectorAll('#userTabs .tab-btn').forEach(function (el) { el.classList.remove('active'); });
@@ -686,14 +907,32 @@ function switchUserTab(tabId) {
   if (tabId === 'u-base') { renderDataView('dataCardUser', false); loadDataTable('dataCardUser'); }
 }
 
+function selectorSistemaHtml_(onchangeFn, current) {
+  return '<div class="field" style="max-width:200px;">' +
+    '<label>Sistema</label>' +
+    '<select onchange="' + onchangeFn + '(this.value)">' +
+      '<option value="" ' + (current === '' ? 'selected' : '') + '>GX1 y GX2</option>' +
+      '<option value="GX1" ' + (current === 'GX1' ? 'selected' : '') + '>Solo GX1</option>' +
+      '<option value="GX2" ' + (current === 'GX2' ? 'selected' : '') + '>Solo GX2</option>' +
+    '</select>' +
+  '</div>';
+}
+
 var STATE_SIN_GESTIONAR_PAGE = 0;
+
+function cambiarSistemaSinGestionar(valor) {
+  TECNICO_SISTEMA_FILTRO = valor;
+  STATE_SIN_GESTIONAR_PAGE = 0;
+  loadSinGestionar();
+}
 
 async function loadSinGestionar() {
   var card = document.getElementById('cardSinGestionar');
   card.innerHTML = '<h2>Clientes sin gestionar</h2><p class="muted">Cargando...</p>';
   try {
-    var res = await api('/gestiones/pendientes-sin-gestionar?page=' + STATE_SIN_GESTIONAR_PAGE + '&pageSize=30');
-    var html = '<h2>Clientes sin gestionar (' + res.total + ')</h2>';
+    var qs = '?page=' + STATE_SIN_GESTIONAR_PAGE + '&pageSize=30&sistema=' + encodeURIComponent(TECNICO_SISTEMA_FILTRO);
+    var res = await api('/gestiones/pendientes-sin-gestionar' + qs);
+    var html = '<h2>Clientes sin gestionar (' + res.total + ')</h2>' + selectorSistemaHtml_('cambiarSistemaSinGestionar', TECNICO_SISTEMA_FILTRO);
     if (!res.rows.length) {
       html += '<p class="muted">No hay clientes pendientes de gestionar en tu zona. 🎉</p>';
     } else {
@@ -717,12 +956,12 @@ function changeSinGestionarPage(delta) {
 function renderClienteCards_(rows) {
   var html = '<div>';
   rows.forEach(function (r) {
-    var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
+    var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna, base: r.base }).replace(/'/g, '&#39;');
     html +=
       '<div class="card" style="margin-bottom:10px; padding:14px;">' +
         '<div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">' +
           '<div>' +
-            '<div style="font-weight:600;">' + escapeHtml(r.nombre) + ' — ' + escapeHtml(r.rut) + '</div>' +
+            '<div style="font-weight:600;">' + sistemaBadge_(r.base) + ' ' + escapeHtml(r.nombre) + ' — ' + escapeHtml(r.rut) + '</div>' +
             '<div class="muted">' + escapeHtml(r.region || '') + (r.region ? ' · ' : '') + escapeHtml(r.comuna) + '</div>' +
             '<div class="muted">' + escapeHtml(r.direccion) + '</div>' +
             '<div class="muted">Tel. casa: ' + escapeHtml(r.casa || '—') + ' · Celular: ' + escapeHtml(r.celular || '—') + '</div>' +
@@ -738,6 +977,7 @@ function renderClienteCards_(rows) {
 
 var AGENDADOS_CACHE = [];
 var AGENDADOS_FILTRO_FECHA = '';
+var AGENDADOS_FILTRO_SISTEMA = '';
 
 async function loadAgendados() {
   var card = document.getElementById('cardAgendados');
@@ -746,17 +986,22 @@ async function loadAgendados() {
     var rows = await api('/gestiones/agendados');
     AGENDADOS_CACHE = rows;
     var hoy = new Date().toISOString().slice(0, 10);
-    if (AGENDADOS_FILTRO_FECHA === undefined) AGENDADOS_FILTRO_FECHA = '';
     renderAgendadosTabla_(hoy);
   } catch (e) {
     card.innerHTML = '<h2>Agendados</h2><p class="error-text">' + e.message + '</p>';
   }
 }
 
+function cambiarSistemaAgendados(valor) {
+  AGENDADOS_FILTRO_SISTEMA = valor;
+  renderAgendadosTabla_();
+}
+
 function renderAgendadosTabla_(hoyParam) {
   var card = document.getElementById('cardAgendados');
   var hoy = hoyParam || new Date().toISOString().slice(0, 10);
   var rows = AGENDADOS_CACHE;
+  if (AGENDADOS_FILTRO_SISTEMA) rows = rows.filter(function (r) { return r.base === AGENDADOS_FILTRO_SISTEMA; });
   var filtered = AGENDADOS_FILTRO_FECHA
     ? rows.filter(function (r) { return r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === AGENDADOS_FILTRO_FECHA; })
     : rows;
@@ -765,6 +1010,7 @@ function renderAgendadosTabla_(hoyParam) {
     '<div class="toolbar" style="justify-content: space-between;">' +
       '<h2 style="margin:0;">Agendados (' + filtered.length + (AGENDADOS_FILTRO_FECHA ? ' de ' + rows.length : '') + ')</h2>' +
     '</div>' +
+    selectorSistemaHtml_('cambiarSistemaAgendados', AGENDADOS_FILTRO_SISTEMA) +
     '<div class="toolbar">' +
       '<label class="muted" style="margin:0;">Ver fecha:</label>' +
       '<input type="date" id="agendadosFechaFiltro" value="' + AGENDADOS_FILTRO_FECHA + '" onchange="filtrarAgendadosPorFecha(this.value)">' +
@@ -775,11 +1021,12 @@ function renderAgendadosTabla_(hoyParam) {
   if (!filtered.length) {
     html += '<p class="muted">' + (AGENDADOS_FILTRO_FECHA ? 'No tienes nada agendado para esa fecha.' : 'No tienes retiros agendados/pendientes.') + '</p>';
   } else {
-    html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Motivo</th><th>Detalle</th><th>Agendado para</th><th></th></tr></thead><tbody>';
+    html += '<table><thead><tr><th>Sistema</th><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Motivo</th><th>Detalle</th><th>Agendado para</th><th></th></tr></thead><tbody>';
     filtered.forEach(function (r) {
       var esHoy = r.fecha_agendada && String(r.fecha_agendada).slice(0, 10) === hoy;
-      var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna }).replace(/'/g, '&#39;');
+      var payload = JSON.stringify({ rut: r.rut, nombre: r.nombre, direccion: r.direccion, comuna: r.comuna, base: r.base }).replace(/'/g, '&#39;');
       html += '<tr' + (esHoy ? ' style="background:#fff8e1;"' : '') + '>' +
+        '<td>' + sistemaBadge_(r.base) + '</td>' +
         '<td>' + escapeHtml(r.nombre) + '</td>' +
         '<td>' + escapeHtml(r.comuna) + '</td>' +
         '<td>' + escapeHtml(r.direccion) + '</td>' +
@@ -799,32 +1046,50 @@ function filtrarAgendadosPorFecha(fecha) {
   renderAgendadosTabla_();
 }
 
+var GESTIONADOS_FILTRO_SISTEMA = '';
+var GESTIONADOS_CACHE = [];
+
 async function loadGestionados() {
   var card = document.getElementById('cardGestionados');
   card.innerHTML = '<h2>Gestionados</h2><p class="muted">Cargando...</p>';
   try {
     var rows = await api('/gestiones/gestionados');
-    var html = '<div class="toolbar" style="justify-content: space-between;"><h2 style="margin:0;">Gestionados (' + rows.length + ')</h2>' +
-      '<button class="btn-primary" onclick="downloadGestionadosPropio()">Descargar Excel</button></div>';
-    if (!rows.length) {
-      html += '<p class="muted">Aún no has marcado retiros como realizados.</p>';
-    } else {
-      html += '<table><thead><tr><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Equipos</th><th>Fecha</th></tr></thead><tbody>';
-      rows.forEach(function (r) {
-        html += '<tr>' +
-          '<td>' + escapeHtml(r.nombre) + '</td>' +
-          '<td>' + escapeHtml(r.comuna) + '</td>' +
-          '<td>' + escapeHtml(r.direccion) + '</td>' +
-          '<td>' + r.cantidad_equipos + '</td>' +
-          '<td>' + new Date(r.created_at).toLocaleString('es-CL') + '</td>' +
-        '</tr>';
-      });
-      html += '</tbody></table>';
-    }
-    card.innerHTML = html;
+    GESTIONADOS_CACHE = rows;
+    renderGestionadosTabla_();
   } catch (e) {
     card.innerHTML = '<h2>Gestionados</h2><p class="error-text">' + e.message + '</p>';
   }
+}
+
+function cambiarSistemaGestionados(valor) {
+  GESTIONADOS_FILTRO_SISTEMA = valor;
+  renderGestionadosTabla_();
+}
+
+function renderGestionadosTabla_() {
+  var card = document.getElementById('cardGestionados');
+  var rows = GESTIONADOS_FILTRO_SISTEMA ? GESTIONADOS_CACHE.filter(function (r) { return r.base === GESTIONADOS_FILTRO_SISTEMA; }) : GESTIONADOS_CACHE;
+
+  var html = '<div class="toolbar" style="justify-content: space-between;"><h2 style="margin:0;">Gestionados (' + rows.length + ')</h2>' +
+    '<button class="btn-primary" onclick="downloadGestionadosPropio()">Descargar Excel</button></div>' +
+    selectorSistemaHtml_('cambiarSistemaGestionados', GESTIONADOS_FILTRO_SISTEMA);
+  if (!rows.length) {
+    html += '<p class="muted">Aún no has marcado retiros como realizados.</p>';
+  } else {
+    html += '<table><thead><tr><th>Sistema</th><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Equipos</th><th>Fecha</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      html += '<tr>' +
+        '<td>' + sistemaBadge_(r.base) + '</td>' +
+        '<td>' + escapeHtml(r.nombre) + '</td>' +
+        '<td>' + escapeHtml(r.comuna) + '</td>' +
+        '<td>' + escapeHtml(r.direccion) + '</td>' +
+        '<td>' + r.cantidad_equipos + '</td>' +
+        '<td>' + new Date(r.created_at).toLocaleString('es-CL') + '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  card.innerHTML = html;
 }
 
 function downloadGestionadosPropio() {
@@ -836,7 +1101,8 @@ var GESTION_CLIENTE_ACTUAL = null;
 
 async function openGestionModal(cliente) {
   GESTION_CLIENTE_ACTUAL = cliente;
-  document.getElementById('gestionModalCliente').textContent = cliente.nombre + ' — ' + cliente.direccion + ' (' + cliente.comuna + ')';
+  document.getElementById('gestionModalCliente').textContent =
+    (cliente.base ? '[' + cliente.base + '] ' : '') + cliente.nombre + ' — ' + cliente.direccion + ' (' + cliente.comuna + ')';
   document.getElementById('gestionEstadoInput').value = 'REALIZADO';
   document.getElementById('gestionDetalleInput').value = '';
   document.getElementById('gestionFechaInput').value = '';
@@ -878,6 +1144,7 @@ async function submitGestion() {
       body: JSON.stringify({
         rut: GESTION_CLIENTE_ACTUAL.rut,
         direccion: GESTION_CLIENTE_ACTUAL.direccion,
+        base: GESTION_CLIENTE_ACTUAL.base,
         estado: estado,
         motivoId: estado === 'PENDIENTE' ? (motivoId || null) : null,
         detalle: detalle || null,
@@ -954,15 +1221,17 @@ async function eliminarMotivo(id) {
 // ---------------------------------------------------------
 async function loadGestionGlobal() {
   var tbody = document.getElementById('gestionGlobalTableBody');
-  tbody.innerHTML = '<tr><td colspan="7" class="muted">Cargando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="muted">Cargando...</td></tr>';
   try {
     var estado = document.getElementById('gestionEstadoFilter').value;
-    var qs = estado ? '?estado=' + encodeURIComponent(estado) : '';
+    var base = document.getElementById('gestionSistemaFilter').value;
+    var qs = '?estado=' + encodeURIComponent(estado) + '&base=' + encodeURIComponent(base);
     var res = await api('/admin/gestiones' + qs);
-    if (!res.rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted">Sin registros.</td></tr>'; return; }
+    if (!res.rows.length) { tbody.innerHTML = '<tr><td colspan="8" class="muted">Sin registros.</td></tr>'; return; }
     var html = '';
     res.rows.forEach(function (r) {
       html += '<tr>' +
+        '<td>' + sistemaBadge_(r.base) + '</td>' +
         '<td>' + escapeHtml(r.tecnico_username) + '</td>' +
         '<td>' + escapeHtml(r.nombre) + '</td>' +
         '<td>' + escapeHtml(r.comuna) + '</td>' +
@@ -974,12 +1243,13 @@ async function loadGestionGlobal() {
     });
     tbody.innerHTML = html;
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="7" class="error-text">' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="error-text">' + e.message + '</td></tr>';
   }
 }
 
 function downloadGestionGlobal() {
   var estado = document.getElementById('gestionEstadoFilter').value;
-  var qs = estado ? '?estado=' + encodeURIComponent(estado) : '';
+  var base = document.getElementById('gestionSistemaFilter').value;
+  var qs = '?estado=' + encodeURIComponent(estado) + '&base=' + encodeURIComponent(base);
   downloadFileFromApi_('/api/admin/gestiones/export' + qs, null, 'gestion_completa.xlsx');
 }

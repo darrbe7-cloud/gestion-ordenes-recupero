@@ -46,7 +46,7 @@ async function requireAuth(req, res, next) {
   }
 
   try {
-    var result = await db.query('SELECT id, username, rol, comunas, tipos, activo FROM users WHERE id = $1', [payload.id]);
+    var result = await db.query('SELECT id, username, rol, comunas, distribuidores, activo, fecha_desde, fecha_hasta FROM users WHERE id = $1', [payload.id]);
     if (!result.rows.length || !result.rows[0].activo) {
       return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED' });
     }
@@ -84,6 +84,19 @@ function requireAdminOrUploader(req, res, next) {
   });
 }
 
+/**
+ * Middleware: exige sesión válida Y rol VENTA_GX1 o VENTA_GX2 (usuarios de
+ * venta con instalación, cada uno viendo su propia base).
+ */
+function requireVenta(req, res, next) {
+  requireAuth(req, res, function () {
+    if (req.user.rol !== 'VENTA_GX1' && req.user.rol !== 'VENTA_GX2') {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para esta acción.' });
+    }
+    next();
+  });
+}
+
 async function login(username, password) {
   username = (username || '').trim();
   if (!username || !password) {
@@ -104,8 +117,7 @@ async function login(username, password) {
       id: user.id,
       username: user.username,
       rol: user.rol,
-      comunas: user.comunas,
-      tipos: user.tipos
+      comunas: user.comunas
     }
   };
 }
@@ -123,6 +135,7 @@ module.exports = {
   requireAuth,
   requireAdmin,
   requireAdminOrUploader,
+  requireVenta,
   login,
   changePassword,
   setSessionCookie,

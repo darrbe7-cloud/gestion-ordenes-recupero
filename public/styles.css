@@ -1,6 +1,8 @@
 :root {
-  --primary: #1a73e8;
-  --primary-dark: #1557b0;
+  --primary: #0b3c8a;
+  --primary-dark: #082a63;
+  --accent: #1eabe3;
+  --gold: #ffc72c;
   --bg: #f5f6f8;
   --card-bg: #ffffff;
   --border: #e0e0e0;
@@ -21,18 +23,24 @@ body {
 
 .login-wrap {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #0f3d7a 0%, #1a73e8 55%, #3d94f0 100%);
+  background: linear-gradient(160deg, var(--primary-dark) 0%, var(--primary) 45%, var(--accent) 100%);
+  position: relative;
+}
+.login-wrap::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px;
+  background: linear-gradient(90deg, var(--gold), #ffe08a, var(--gold));
 }
 .login-card {
-  background: var(--card-bg); padding: 44px 40px; border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(15,61,122,0.35); width: 360px;
+  background: var(--card-bg); padding: 44px 40px 36px 40px; border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(8,42,99,0.45); width: 370px;
+  border-top: 4px solid var(--gold);
 }
 .login-logo {
-  text-align: center; font-weight: 800; font-size: 15px; letter-spacing: 3px;
-  color: var(--primary); background: #e8f0fe; border-radius: 999px;
-  padding: 6px 0; margin: 0 auto 18px auto; width: 90px;
+  text-align: center; font-weight: 800; font-size: 26px; letter-spacing: 1px;
+  color: var(--primary); margin: 0 auto 6px auto; font-family: Arial, sans-serif;
 }
-.login-card h1 { font-size: 21px; margin: 0 0 4px 0; text-align: center; line-height: 1.3; }
+.login-logo span { color: var(--accent); }
+.login-card h1 { font-size: 18px; margin: 0 0 4px 0; text-align: center; line-height: 1.3; color: var(--primary-dark); font-weight: 600; }
 .login-subtitle { text-align: center; color: var(--text-muted); font-size: 13px; margin: 0 0 26px 0; }
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
@@ -50,11 +58,12 @@ button { cursor: pointer; border: none; border-radius: 6px; padding: 10px 16px; 
 .success-text { color: var(--success); font-size: 13px; margin-top: 8px; }
 
 .topbar {
-  background: var(--card-bg); border-bottom: 1px solid var(--border); padding: 12px 24px;
+  background: var(--primary); border-bottom: 3px solid var(--gold); padding: 14px 24px;
   display: flex; align-items: center; justify-content: space-between;
 }
-.topbar .title { font-weight: 600; font-size: 16px; }
-.topbar .user-info { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--text-muted); }
+.topbar .title { font-weight: 700; font-size: 16px; color: #fff; letter-spacing: 0.3px; }
+.topbar .user-info { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #dbe7fb; }
+.topbar .user-info .btn-secondary { background: #ffffff; }
 .container { padding: 24px; max-width: 1200px; margin: 0 auto; }
 
 .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 20px; }

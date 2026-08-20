@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gestión Órdenes Recupero</title>
+  <title>Bases de Recupero de Equipos — TUVES</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -11,7 +11,9 @@
   <!-- ===================== LOGIN ===================== -->
   <div id="view-login" class="login-wrap">
     <div class="login-card">
-      <h1>Gestión Órdenes Recupero</h1>
+      <div class="login-logo">TUVES</div>
+      <h1>Bases de Recupero de Equipos</h1>
+      <p class="login-subtitle">Gestión GX1 · GX2</p>
       <div class="field">
         <label>Usuario</label>
         <input type="text" id="loginUsername" autocomplete="username">
@@ -28,7 +30,7 @@
   <!-- ===================== APP SHELL ===================== -->
   <div id="view-app" class="hidden">
     <div class="topbar">
-      <div class="title">Gestión Órdenes Recupero</div>
+      <div class="title">Bases de Recupero de Equipos — TUVES</div>
       <div class="user-info">
         <span id="topbarUser"></span>
         <button class="btn-secondary" onclick="openChangePassword()">Cambiar clave</button>
@@ -42,22 +44,41 @@
         <button class="tab-btn active" data-tab="tab-upload" onclick="switchTab('tab-upload')">Cargar archivo</button>
         <button class="tab-btn" data-tab="tab-users" onclick="switchTab('tab-users')">Usuarios</button>
         <button class="tab-btn" data-tab="tab-data" onclick="switchTab('tab-data')">Ver datos</button>
+        <button class="tab-btn" data-tab="tab-modelos" onclick="switchTab('tab-modelos')">Modelos permitidos</button>
         <button class="tab-btn" data-tab="tab-motivos" onclick="switchTab('tab-motivos')">Motivos</button>
         <button class="tab-btn" data-tab="tab-gestion" onclick="switchTab('tab-gestion')">Gestión</button>
       </div>
 
-      <!-- TAB: CARGAR ARCHIVO -->
+      <!-- TAB: CARGAR ARCHIVO (admin) -->
       <div id="tab-upload" class="tab-content">
         <div class="card">
           <h2>Subir y procesar archivo</h2>
-          <p class="muted">Selecciona el .xlsx más reciente. Al procesarlo, la base anterior se reemplaza por completo.</p>
+          <p class="muted">Cada base (GX1 o GX2) se reemplaza por completo al procesarla — la otra base no se ve afectada.</p>
+          <div class="field" style="max-width:220px;">
+            <label>Base a actualizar</label>
+            <select id="uploadBaseSelect">
+              <option value="GX2">GX2</option>
+              <option value="GX1">GX1 (filtro de antigüedad)</option>
+            </select>
+          </div>
+          <div class="field" style="max-width:260px;">
+            <label>GX1 — días mínimos desde FCH_INGRESO</label>
+            <div class="form-row">
+              <input type="number" id="gx1DiasMinimosInput" min="0" style="max-width:100px;">
+              <button class="btn-secondary" onclick="guardarGx1DiasMinimos()">Guardar</button>
+            </div>
+            <p class="muted" style="margin:4px 0 0 0;">Solo se cargan órdenes GX1 con más de esta cantidad de días desde su ingreso. Aplica en la próxima vez que proceses GX1.</p>
+          </div>
           <input type="file" id="fileInput" accept=".xlsx">
           <button class="btn-primary" style="margin-top:10px;" onclick="uploadFile()">Subir y procesar</button>
         </div>
         <div id="processProgress"></div>
         <div class="card">
-          <h2>Estado actual de la base</h2>
-          <div id="metaStats" class="stat-row"></div>
+          <h2>Estado actual de las bases</h2>
+          <h3>GX1</h3>
+          <div id="metaStatsGx1" class="stat-row"></div>
+          <h3 style="margin-top:20px;">GX2</h3>
+          <div id="metaStatsGx2" class="stat-row"></div>
         </div>
       </div>
 
@@ -74,7 +95,7 @@
             </div>
           </div>
           <table>
-            <thead><tr><th>Usuario</th><th>Rol</th><th>Comunas</th><th>Tipos</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Rol</th><th>Comunas</th><th>Fechas</th><th>Estado</th><th></th></tr></thead>
             <tbody id="usersTableBody"></tbody>
           </table>
         </div>
@@ -83,6 +104,28 @@
       <!-- TAB: VER DATOS (admin) -->
       <div id="tab-data" class="tab-content hidden">
         <div class="card" id="dataCardAdmin"></div>
+      </div>
+
+      <!-- TAB: MODELOS PERMITIDOS (admin, global por base) -->
+      <div id="tab-modelos" class="tab-content hidden">
+        <div class="card">
+          <h2>Modelos/equipos permitidos para retiro</h2>
+          <p class="muted">Define, por separado para cada base, qué modelos se pueden retirar. Vacío = todos los modelos permitidos. Esto aplica a todos los usuarios por igual.</p>
+          <div class="form-row" style="align-items:flex-start;">
+            <div class="field">
+              <label>GX1</label>
+              <input type="text" class="search-mini" placeholder="Buscar modelo..." oninput="filterCheckboxList('modelosGx1List', this.value)">
+              <div class="checkbox-list" id="modelosGx1List" style="max-height:260px;"></div>
+              <button class="btn-primary" style="margin-top:8px;" onclick="guardarModelosPermitidos('GX1')">Guardar GX1</button>
+            </div>
+            <div class="field">
+              <label>GX2</label>
+              <input type="text" class="search-mini" placeholder="Buscar modelo..." oninput="filterCheckboxList('modelosGx2List', this.value)">
+              <div class="checkbox-list" id="modelosGx2List" style="max-height:260px;"></div>
+              <button class="btn-primary" style="margin-top:8px;" onclick="guardarModelosPermitidos('GX2')">Guardar GX2</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: MOTIVOS (admin) -->
@@ -116,16 +159,44 @@
               <option value="PENDIENTE">Pendiente</option>
               <option value="REALIZADO">Realizado</option>
             </select>
+            <select id="gestionSistemaFilter" onchange="loadGestionGlobal()" style="padding:8px; border:1px solid var(--border); border-radius:6px;">
+              <option value="">GX1 y GX2</option>
+              <option value="GX1">Solo GX1</option>
+              <option value="GX2">Solo GX2</option>
+            </select>
           </div>
           <table>
-            <thead><tr><th>Técnico</th><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Estado</th><th>Motivo</th><th>Fecha</th></tr></thead>
+            <thead><tr><th>Sistema</th><th>Técnico</th><th>Cliente</th><th>Comuna</th><th>Dirección</th><th>Estado</th><th>Motivo</th><th>Fecha</th></tr></thead>
             <tbody id="gestionGlobalTableBody"></tbody>
           </table>
         </div>
       </div>
 
+      <!-- DASHBOARD: UPLOADER (solo subir archivos) -->
+      <div id="uploaderDashboard" class="hidden">
+        <div class="card">
+          <h2>Subir y procesar archivo</h2>
+          <p class="muted">Cada base (GX1 o GX2) se reemplaza por completo al procesarla — la otra base no se ve afectada.</p>
+          <div class="field" style="max-width:220px;">
+            <label>Base a actualizar</label>
+            <select id="uploadBaseSelectUploader">
+              <option value="GX2">GX2</option>
+              <option value="GX1">GX1 (filtro de antigüedad)</option>
+            </select>
+          </div>
+          <input type="file" id="fileInputUploader" accept=".xlsx">
+          <button class="btn-primary" style="margin-top:10px;" onclick="uploadFileUploader()">Subir y procesar</button>
+        </div>
+        <div id="processProgressUploader"></div>
+        <div class="card">
+          <h2>Últimas subidas</h2>
+          <div id="uploaderHistory" class="stat-row"></div>
+        </div>
+      </div>
+
       <!-- USER DASHBOARD (técnico de terreno) -->
       <div id="userDashboard" class="hidden">
+        <div class="card" id="userUploadDatesCard" style="padding:12px 20px;"></div>
         <div class="tabs" id="userTabs">
           <button class="tab-btn active" data-utab="u-sin-gestionar" onclick="switchUserTab('u-sin-gestionar')">Sin gestionar</button>
           <button class="tab-btn" data-utab="u-agendados" onclick="switchUserTab('u-agendados')">Agendados</button>
@@ -195,8 +266,9 @@
         </div>
         <div class="field">
           <label>Rol</label>
-          <select id="userModalRol">
-            <option value="USER">Usuario</option>
+          <select id="userModalRol" onchange="onUserModalRolChange()">
+            <option value="USER">Usuario (técnico de terreno)</option>
+            <option value="UPLOADER">Solo subir archivos</option>
             <option value="ADMIN">Administrador</option>
           </select>
         </div>
@@ -205,24 +277,34 @@
         <label id="userModalPasswordLabel">Contraseña</label>
         <input type="password" id="userModalPassword">
       </div>
-      <div class="field">
-        <label>Comunas que puede ver (vacío = todas)</label>
-        <div class="form-row" style="margin-bottom:6px;">
-          <select id="regionFilterSelect" onchange="filterCheckboxListByRegion('comunasCheckboxList', this.value)" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px;">
-            <option value="">Todas las regiones</option>
-          </select>
+      <div id="userModalTerritorioWrap">
+        <div class="field">
+          <label>Comunas que puede ver (vacío = todas)</label>
+          <div class="form-row" style="margin-bottom:6px;">
+            <select id="regionFilterSelect" onchange="filterCheckboxListByRegion('comunasCheckboxList', this.value)" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px;">
+              <option value="">Todas las regiones</option>
+            </select>
+          </div>
+          <input type="text" class="search-mini" placeholder="Buscar comuna..." oninput="filterCheckboxList('comunasCheckboxList', this.value)">
+          <div class="checkbox-list" id="comunasCheckboxList"></div>
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('comunasCheckboxList', true)">Marcar visibles</button>
+            <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('comunasCheckboxList', false)">Desmarcar visibles</button>
+          </div>
         </div>
-        <input type="text" class="search-mini" placeholder="Buscar comuna..." oninput="filterCheckboxList('comunasCheckboxList', this.value)">
-        <div class="checkbox-list" id="comunasCheckboxList"></div>
-        <div style="display:flex; gap:8px; margin-top:6px;">
-          <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('comunasCheckboxList', true)">Marcar visibles</button>
-          <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('comunasCheckboxList', false)">Desmarcar visibles</button>
+        <div class="field">
+          <label>Rango de fecha de ingreso que puede ver (vacío = sin límite)</label>
+          <div class="form-row">
+            <div class="field">
+              <label class="muted" style="font-size:11px;">Desde (mes)</label>
+              <input type="month" id="userModalMesDesde">
+            </div>
+            <div class="field">
+              <label class="muted" style="font-size:11px;">Hasta (mes)</label>
+              <input type="month" id="userModalMesHasta">
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="field">
-        <label>Tipos de equipo que puede ver (vacío = todos)</label>
-        <input type="text" class="search-mini" placeholder="Buscar tipo..." oninput="filterCheckboxList('tiposCheckboxList', this.value)">
-        <div class="checkbox-list" id="tiposCheckboxList"></div>
       </div>
       <div class="field">
         <label><input type="checkbox" id="userModalActivo" style="width:auto;" checked> Usuario activo</label>

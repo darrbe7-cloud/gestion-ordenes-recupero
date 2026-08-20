@@ -44,6 +44,7 @@
         <button class="tab-btn active" data-tab="tab-upload" onclick="switchTab('tab-upload')">Cargar archivo</button>
         <button class="tab-btn" data-tab="tab-users" onclick="switchTab('tab-users')">Usuarios</button>
         <button class="tab-btn" data-tab="tab-data" onclick="switchTab('tab-data')">Ver datos</button>
+        <button class="tab-btn" data-tab="tab-bodega" onclick="switchTab('tab-bodega')">Bodega</button>
         <button class="tab-btn" data-tab="tab-modelos" onclick="switchTab('tab-modelos')">Modelos permitidos</button>
         <button class="tab-btn" data-tab="tab-motivos" onclick="switchTab('tab-motivos')">Motivos</button>
         <button class="tab-btn" data-tab="tab-gestion" onclick="switchTab('tab-gestion')">Gestión</button>
@@ -53,21 +54,30 @@
       <div id="tab-upload" class="tab-content">
         <div class="card">
           <h2>Subir y procesar archivo</h2>
-          <p class="muted">Cada base (GX1 o GX2) se reemplaza por completo al procesarla — la otra base no se ve afectada.</p>
-          <div class="field" style="max-width:220px;">
-            <label>Base a actualizar</label>
-            <select id="uploadBaseSelect">
-              <option value="GX2">GX2</option>
-              <option value="GX1">GX1 (filtro de antigüedad)</option>
-            </select>
+          <p class="muted">Cada base se reemplaza por completo al procesarla — el resto de la información no se ve afectada.</p>
+          <div class="form-row">
+            <div class="field" style="max-width:200px;">
+              <label>Tipo de archivo</label>
+              <select id="uploadTipoSelect">
+                <option value="ORDENES">Órdenes de recupero</option>
+                <option value="BODEGA">Material en bodega</option>
+              </select>
+            </div>
+            <div class="field" style="max-width:220px;">
+              <label>Base a actualizar</label>
+              <select id="uploadBaseSelect">
+                <option value="GX2">GX2</option>
+                <option value="GX1">GX1</option>
+              </select>
+            </div>
           </div>
           <div class="field" style="max-width:260px;">
-            <label>GX1 — días mínimos desde FCH_INGRESO</label>
+            <label>GX1 — días para separar venta / terreno</label>
             <div class="form-row">
               <input type="number" id="gx1DiasMinimosInput" min="0" style="max-width:100px;">
               <button class="btn-secondary" onclick="guardarGx1DiasMinimos()">Guardar</button>
             </div>
-            <p class="muted" style="margin:4px 0 0 0;">Solo se cargan órdenes GX1 con más de esta cantidad de días desde su ingreso. Aplica en la próxima vez que proceses GX1.</p>
+            <p class="muted" style="margin:4px 0 0 0;">Órdenes GX1 con esta cantidad de días o menos desde su ingreso se muestran al equipo de venta; con más días, al técnico de terreno.</p>
           </div>
           <input type="file" id="fileInput" accept=".xlsx">
           <button class="btn-primary" style="margin-top:10px;" onclick="uploadFile()">Subir y procesar</button>
@@ -75,10 +85,14 @@
         <div id="processProgress"></div>
         <div class="card">
           <h2>Estado actual de las bases</h2>
-          <h3>GX1</h3>
+          <h3>GX1 — Órdenes</h3>
           <div id="metaStatsGx1" class="stat-row"></div>
-          <h3 style="margin-top:20px;">GX2</h3>
+          <h3 style="margin-top:20px;">GX2 — Órdenes</h3>
           <div id="metaStatsGx2" class="stat-row"></div>
+          <h3 style="margin-top:20px;">GX1 — Bodega</h3>
+          <div id="metaStatsBodegaGx1" class="stat-row"></div>
+          <h3 style="margin-top:20px;">GX2 — Bodega</h3>
+          <div id="metaStatsBodegaGx2" class="stat-row"></div>
         </div>
       </div>
 
@@ -104,6 +118,18 @@
       <!-- TAB: VER DATOS (admin) -->
       <div id="tab-data" class="tab-content hidden">
         <div class="card" id="dataCardAdmin"></div>
+      </div>
+
+      <!-- TAB: BODEGA (admin) -->
+      <div id="tab-bodega" class="tab-content hidden">
+        <div class="card">
+          <h2>Depósitos visibles para el equipo de venta</h2>
+          <p class="muted">Elige qué depósitos puede ver el equipo de venta (GX1 y GX2). Vacío = todos visibles.</p>
+          <input type="text" class="search-mini" placeholder="Buscar depósito..." oninput="filterCheckboxList('depositosVisiblesList', this.value)">
+          <div class="checkbox-list" id="depositosVisiblesList" style="max-height:200px;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="guardarDepositosVisibles()">Guardar</button>
+        </div>
+        <div class="card" id="bodegaCardAdmin"></div>
       </div>
 
       <!-- TAB: MODELOS PERMITIDOS (admin, global por base) -->
@@ -176,21 +202,46 @@
       <div id="uploaderDashboard" class="hidden">
         <div class="card">
           <h2>Subir y procesar archivo</h2>
-          <p class="muted">Cada base (GX1 o GX2) se reemplaza por completo al procesarla — la otra base no se ve afectada.</p>
-          <div class="field" style="max-width:220px;">
-            <label>Base a actualizar</label>
-            <select id="uploadBaseSelectUploader">
-              <option value="GX2">GX2</option>
-              <option value="GX1">GX1 (filtro de antigüedad)</option>
-            </select>
+          <p class="muted">Cada base se reemplaza por completo al procesarla.</p>
+          <div class="form-row">
+            <div class="field" style="max-width:200px;">
+              <label>Tipo de archivo</label>
+              <select id="uploadTipoSelectUploader">
+                <option value="ORDENES">Órdenes de recupero</option>
+                <option value="BODEGA">Material en bodega</option>
+              </select>
+            </div>
+            <div class="field" style="max-width:220px;">
+              <label>Base a actualizar</label>
+              <select id="uploadBaseSelectUploader">
+                <option value="GX2">GX2</option>
+                <option value="GX1">GX1</option>
+              </select>
+            </div>
           </div>
           <input type="file" id="fileInputUploader" accept=".xlsx">
           <button class="btn-primary" style="margin-top:10px;" onclick="uploadFileUploader()">Subir y procesar</button>
         </div>
         <div id="processProgressUploader"></div>
         <div class="card">
-          <h2>Últimas subidas</h2>
+          <h2>Últimas subidas — Órdenes</h2>
           <div id="uploaderHistory" class="stat-row"></div>
+          <h2 style="margin-top:20px;">Últimas subidas — Bodega</h2>
+          <div id="uploaderHistoryBodega" class="stat-row"></div>
+        </div>
+      </div>
+
+      <!-- DASHBOARD: VENTA (GX1 o GX2) -->
+      <div id="ventaDashboard" class="hidden">
+        <div class="tabs" id="ventaTabs">
+          <button class="tab-btn active" data-vtab="v-ordenes" onclick="switchVentaTab('v-ordenes')">Órdenes</button>
+          <button class="tab-btn" data-vtab="v-bodega" onclick="switchVentaTab('v-bodega')">Material en bodega</button>
+        </div>
+        <div id="v-ordenes" class="tab-content">
+          <div class="card" id="ventaOrdenesCard"></div>
+        </div>
+        <div id="v-bodega" class="tab-content hidden">
+          <div class="card" id="ventaBodegaCard"></div>
         </div>
       </div>
 
@@ -268,6 +319,8 @@
           <label>Rol</label>
           <select id="userModalRol" onchange="onUserModalRolChange()">
             <option value="USER">Usuario (técnico de terreno)</option>
+            <option value="VENTA_GX1">Venta con instalación — GX1</option>
+            <option value="VENTA_GX2">Venta con instalación — GX2</option>
             <option value="UPLOADER">Solo subir archivos</option>
             <option value="ADMIN">Administrador</option>
           </select>
@@ -303,6 +356,17 @@
               <label class="muted" style="font-size:11px;">Hasta (mes)</label>
               <input type="month" id="userModalMesHasta">
             </div>
+          </div>
+        </div>
+      </div>
+      <div id="userModalDistribuidoresWrap" class="hidden">
+        <div class="field">
+          <label>Distribuidores que puede ver (vacío = todos)</label>
+          <input type="text" class="search-mini" placeholder="Buscar distribuidor..." oninput="filterCheckboxList('distribuidoresCheckboxList', this.value)">
+          <div class="checkbox-list" id="distribuidoresCheckboxList"></div>
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('distribuidoresCheckboxList', true)">Marcar visibles</button>
+            <button type="button" class="btn-secondary" style="font-size:12px; padding:5px 10px;" onclick="checkVisible('distribuidoresCheckboxList', false)">Desmarcar visibles</button>
           </div>
         </div>
       </div>

@@ -8,6 +8,7 @@ const authRoutes = require('./src/authRoutes');
 const adminRoutes = require('./src/adminRoutes');
 const dataRoutes = require('./src/dataRoutes');
 const gestionRoutes = require('./src/gestionRoutes');
+const uploadRoutes = require('./src/uploadRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use('/api', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', dataRoutes);
 app.use('/api/gestiones', gestionRoutes);
+app.use('/api/upload', uploadRoutes);
 
 app.get('/health', function (req, res) { res.json({ ok: true }); });
 

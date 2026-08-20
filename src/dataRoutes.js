@@ -38,12 +38,19 @@ function buildTiposPermitidosCondition_(tiposPermitidos, p, conditions, params) 
   return p;
 }
 
+async function getGx1DiasMinimos_() {
+  var v = await db.getMeta('GX1_DIAS_MINIMOS');
+  return v && !isNaN(Number(v)) ? Number(v) : processFile.GX1_DIAS_MINIMOS_DEFAULT;
+}
+
 /**
  * Construye la cláusula WHERE + parámetros según el alcance del usuario
  * (comunas/rango de fechas de ingreso asignados) más los filtros opcionales
  * (búsqueda, tipo y mes ad-hoc para admin, sistema GX1/GX2, tipos permitidos globales).
+ * Para el técnico (rol USER), las filas de GX1 solo se muestran si superan
+ * la antigüedad mínima configurada (las recientes son para el equipo de venta).
  */
-function buildScopeQuery_(user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos) {
+async function buildScopeQuery_(user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos) {
   var conditions = [];
   var params = [];
   var p = 1;
@@ -62,6 +69,13 @@ function buildScopeQuery_(user, search, tipoFilter, mesDesde, mesHasta, sistemaF
   if (user.rol !== 'ADMIN' && user.fecha_hasta) {
     conditions.push('fch_ingreso <= $' + p++);
     params.push(user.fecha_hasta);
+  }
+  // El técnico de terreno (USER) solo ve GX1 cuando la orden ya superó la
+  // antigüedad mínima configurada (las órdenes recientes son para venta).
+  if (user.rol === 'USER') {
+    var dias = await getGx1DiasMinimos_();
+    conditions.push("(base <> 'GX1' OR (CURRENT_DATE - fch_ingreso) > $" + p++ + ')');
+    params.push(dias);
   }
   if (user.rol === 'ADMIN' && tipoFilter && tipoFilter.length) {
     conditions.push('tipo = ANY($' + p++ + ')');
@@ -108,7 +122,7 @@ router.get('/data', async function (req, res) {
   var sistemaFilter = req.query.sistema || '';
 
   var tiposPermitidos = await getTiposPermitidos_();
-  var scoped = buildScopeQuery_(req.user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos);
+  var scoped = await buildScopeQuery_(req.user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos);
 
   var countResult = await db.query('SELECT COUNT(*) FROM data_rows ' + scoped.where, scoped.params);
   var total = Number(countResult.rows[0].count);
@@ -143,7 +157,7 @@ router.get('/data/export', async function (req, res) {
   var sistemaFilter = req.query.sistema || '';
 
   var tiposPermitidos = await getTiposPermitidos_();
-  var scoped = buildScopeQuery_(req.user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos);
+  var scoped = await buildScopeQuery_(req.user, search, tipoFilter, mesDesde, mesHasta, sistemaFilter, tiposPermitidos);
 
   var countResult = await db.query('SELECT COUNT(*) FROM data_rows ' + scoped.where, scoped.params);
   var total = Number(countResult.rows[0].count);

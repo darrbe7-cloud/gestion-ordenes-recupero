@@ -224,34 +224,43 @@
 
       <!-- DASHBOARD: UPLOADER (solo subir archivos) -->
       <div id="uploaderDashboard" class="hidden">
-        <div class="card">
-          <h2>Subir y procesar archivo</h2>
-          <p class="muted">Cada base se reemplaza por completo al procesarla.</p>
-          <div class="form-row">
-            <div class="field" style="max-width:200px;">
-              <label>Tipo de archivo</label>
-              <select id="uploadTipoSelectUploader">
-                <option value="ORDENES">Órdenes de recupero</option>
-                <option value="BODEGA">Material en bodega</option>
-              </select>
-            </div>
-            <div class="field" style="max-width:220px;">
-              <label>Base a actualizar</label>
-              <select id="uploadBaseSelectUploader">
-                <option value="GX2">GX2</option>
-                <option value="GX1">GX1</option>
-              </select>
-            </div>
-          </div>
-          <input type="file" id="fileInputUploader" accept=".xlsx">
-          <button class="btn-primary" style="margin-top:10px;" onclick="uploadFileUploader()">Subir y procesar</button>
+        <div class="tabs" id="uploaderTabs">
+          <button class="tab-btn active" data-uptab="up-subir" onclick="switchUploaderTab('up-subir')">Subir archivo</button>
+          <button class="tab-btn" data-uptab="up-bodega" onclick="switchUploaderTab('up-bodega')">Material en bodega</button>
         </div>
-        <div id="processProgressUploader"></div>
-        <div class="card">
-          <h2>Últimas subidas — Órdenes</h2>
-          <div id="uploaderHistory" class="stat-row"></div>
-          <h2 style="margin-top:20px;">Últimas subidas — Bodega</h2>
-          <div id="uploaderHistoryBodega" class="stat-row"></div>
+        <div id="up-subir" class="tab-content">
+          <div class="card">
+            <h2>Subir y procesar archivo</h2>
+            <p class="muted">Cada base se reemplaza por completo al procesarla.</p>
+            <div class="form-row">
+              <div class="field" style="max-width:200px;">
+                <label>Tipo de archivo</label>
+                <select id="uploadTipoSelectUploader">
+                  <option value="ORDENES">Órdenes de recupero</option>
+                  <option value="BODEGA">Material en bodega</option>
+                </select>
+              </div>
+              <div class="field" style="max-width:220px;">
+                <label>Base a actualizar</label>
+                <select id="uploadBaseSelectUploader">
+                  <option value="GX2">GX2</option>
+                  <option value="GX1">GX1</option>
+                </select>
+              </div>
+            </div>
+            <input type="file" id="fileInputUploader" accept=".xlsx">
+            <button class="btn-primary" style="margin-top:10px;" onclick="uploadFileUploader()">Subir y procesar</button>
+          </div>
+          <div id="processProgressUploader"></div>
+          <div class="card">
+            <h2>Últimas subidas — Órdenes</h2>
+            <div id="uploaderHistory" class="stat-row"></div>
+            <h2 style="margin-top:20px;">Últimas subidas — Bodega</h2>
+            <div id="uploaderHistoryBodega" class="stat-row"></div>
+          </div>
+        </div>
+        <div id="up-bodega" class="tab-content hidden">
+          <div class="card" id="uploaderBodegaCard"></div>
         </div>
       </div>
 

@@ -812,6 +812,17 @@ function sistemaBadge_(base) {
   return '<span class="badge ' + (base === 'GX1' ? 'badge-gx1' : 'badge-gx2') + '">' + base + '</span>';
 }
 
+async function renderFechasOrdenesInfo_(elId) {
+  try {
+    var info = await api('/base-info');
+    var partes = [];
+    if (info.gx1.fecha) partes.push('GX1 actualizado: ' + new Date(info.gx1.fecha).toLocaleString('es-CL'));
+    if (info.gx2.fecha) partes.push('GX2 actualizado: ' + new Date(info.gx2.fecha).toLocaleString('es-CL'));
+    var el = document.getElementById(elId);
+    if (el) el.textContent = partes.join('  ·  ');
+  } catch (e) {}
+}
+
 function renderDataView(cardId, isAdmin) {
   var card = document.getElementById(cardId);
   var tipoFilterHtml = '';
@@ -831,7 +842,10 @@ function renderDataView(cardId, isAdmin) {
       '</div>';
   }
   card.innerHTML =
-    '<h2>' + (isAdmin ? 'Datos (todas las comunas y tipos)' : 'Mis datos asignados') + '</h2>' +
+    '<div class="toolbar" style="justify-content: space-between; align-items:flex-start;">' +
+      '<h2 style="margin:0;">' + (isAdmin ? 'Datos (todas las comunas y tipos)' : 'Mis datos asignados') + '</h2>' +
+      '<span id="ordenesFechaInfo_' + cardId + '" class="muted" style="font-size:12px; text-align:right;"></span>' +
+    '</div>' +
     '<div class="field" style="max-width:220px;">' +
       '<label>Sistema</label>' +
       '<select id="sistemaFilterSelect_' + cardId + '" onchange="onSistemaFilterChange(\'' + cardId + '\')">' +
@@ -853,6 +867,7 @@ function renderDataView(cardId, isAdmin) {
     '<div class="pagination" id="pagination_' + cardId + '"></div>';
 
   if (isAdmin) renderCheckboxList('adminTipoFilterList', STATE.metaLists.tipos || [], []);
+  renderFechasOrdenesInfo_('ordenesFechaInfo_' + cardId);
 }
 
 function onSistemaFilterChange(cardId) {
@@ -1400,7 +1415,10 @@ function bodegaPathPrefix_(mode) {
 async function renderBodegaView(cardId, mode) {
   var card = document.getElementById(cardId);
   card.innerHTML =
-    '<h2>Material en bodega</h2>' +
+    '<div class="toolbar" style="justify-content: space-between; align-items:flex-start;">' +
+      '<h2 style="margin:0;">Material en bodega</h2>' +
+      '<span id="bodegaFechaInfo_' + cardId + '" class="muted" style="font-size:12px; text-align:right;"></span>' +
+    '</div>' +
     '<div class="form-row">' +
       '<div class="field" style="max-width:220px;">' +
         '<label>Sistema</label>' +
@@ -1427,6 +1445,14 @@ async function renderBodegaView(cardId, mode) {
       '<tbody id="bodegaTableBody_' + cardId + '"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>' +
     '</table>' +
     '<div class="pagination" id="bodegaPagination_' + cardId + '"></div>';
+
+  try {
+    var fechas = await api('/bodega-info');
+    var partes = [];
+    if (fechas.gx1) partes.push('GX1 actualizado: ' + new Date(fechas.gx1).toLocaleString('es-CL'));
+    if (fechas.gx2) partes.push('GX2 actualizado: ' + new Date(fechas.gx2).toLocaleString('es-CL'));
+    document.getElementById('bodegaFechaInfo_' + cardId).textContent = partes.join('  ·  ');
+  } catch (e) {}
 
   try {
     var path = bodegaPathPrefix_(mode) + '/depositos';
@@ -1527,7 +1553,10 @@ function renderVentaOrdenesView() {
   var card = document.getElementById('ventaOrdenesCard');
   var tituloBase = STATE.rol === 'VENTA_GX1' ? 'GX1' : 'GX2';
   card.innerHTML =
-    '<h2>Órdenes de recupero — ' + tituloBase + '</h2>' +
+    '<div class="toolbar" style="justify-content: space-between; align-items:flex-start;">' +
+      '<h2 style="margin:0;">Órdenes de recupero — ' + tituloBase + '</h2>' +
+      '<span id="ventaOrdenesFechaInfo" class="muted" style="font-size:12px; text-align:right;"></span>' +
+    '</div>' +
     '<div class="toolbar">' +
       '<input type="text" id="ventaOrdenesSearchInput" placeholder="Buscar por RUT, nombre, dirección o comuna...">' +
       '<button class="btn-secondary" onclick="onVentaOrdenesSearch()">Buscar</button>' +
@@ -1538,6 +1567,7 @@ function renderVentaOrdenesView() {
       '<tbody id="ventaOrdenesTableBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>' +
     '</table>' +
     '<div class="pagination" id="ventaOrdenesPagination"></div>';
+  renderFechasOrdenesInfo_('ventaOrdenesFechaInfo');
 }
 
 function onVentaOrdenesSearch() {

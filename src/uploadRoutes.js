@@ -59,10 +59,15 @@ router.get('/history', async function (req, res) {
 });
 
 /**
- * Vista de bodega para ADMIN y UPLOADER: ve todo lo cargado, sin restricción
- * de depósito (esa restricción es solo para el equipo de venta).
+ * Vista de bodega para UPLOADER: se restringe a los mismos depósitos visibles
+ * que el equipo de venta (el que sube el archivo solo verifica lo que
+ * corresponde mostrar, no la bodega completa). El admin usa su propia ruta
+ * en /api/admin/bodega, que sí ve todo sin restricción.
  */
 router.get('/bodega', async function (req, res) {
+  if (req.user.rol !== 'UPLOADER') {
+    return res.status(403).json({ ok: false, error: 'Usa /api/admin/bodega si eres administrador.' });
+  }
   var page = parseInt(req.query.page || '0', 10);
   var pageSize = Math.min(parseInt(req.query.pageSize || '100', 10), 500);
   var search = req.query.search || '';
@@ -72,6 +77,11 @@ router.get('/bodega', async function (req, res) {
   var conditions = ['stock > 0'];
   var params = [];
   var p = 1;
+
+  var visiblesJson = await db.getMeta('DEPOSITOS_VISIBLES_JSON');
+  var visibles = visiblesJson ? JSON.parse(visiblesJson) : [];
+  if (visibles.length) { conditions.push('deposito = ANY($' + p++ + ')'); params.push(visibles); }
+
   if (base) { conditions.push('base = $' + p++); params.push(base); }
   if (deposito) { conditions.push('deposito = $' + p++); params.push(deposito); }
   if (search) {
@@ -96,6 +106,11 @@ router.get('/bodega', async function (req, res) {
 });
 
 router.get('/depositos', async function (req, res) {
+  var visiblesJson = await db.getMeta('DEPOSITOS_VISIBLES_JSON');
+  var visibles = visiblesJson ? JSON.parse(visiblesJson) : [];
+  if (visibles.length) {
+    return res.json({ todos: visibles });
+  }
   var result = await db.query("SELECT DISTINCT deposito FROM bodega_items WHERE stock > 0 AND deposito IS NOT NULL AND deposito <> '' ORDER BY deposito");
   res.json({ todos: result.rows.map(function (r) { return r.deposito; }) });
 });

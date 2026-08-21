@@ -142,19 +142,35 @@ async function buildBodegaScope_(search) {
   return { where: 'WHERE ' + conditions.join(' AND '), params: params, nextParamIndex: p };
 }
 
+router.get('/depositos', async function (req, res) {
+  var visiblesJson = await db.getMeta('DEPOSITOS_VISIBLES_JSON');
+  var visibles = visiblesJson ? JSON.parse(visiblesJson) : [];
+  if (visibles.length) {
+    return res.json({ depositos: visibles });
+  }
+  // Sin restricción configurada -> se ofrecen todos los depósitos que existan con stock
+  var result = await db.query("SELECT DISTINCT deposito FROM bodega_items WHERE stock > 0 AND deposito IS NOT NULL AND deposito <> '' ORDER BY deposito");
+  res.json({ depositos: result.rows.map(function (r) { return r.deposito; }) });
+});
+
 router.get('/bodega', async function (req, res) {
   var page = parseInt(req.query.page || '0', 10);
   var pageSize = Math.min(parseInt(req.query.pageSize || '100', 10), 500);
   var search = req.query.search || '';
   var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
+  var deposito = req.query.deposito || '';
 
   var scope = await buildBodegaScope_(search);
   var where = scope.where;
   var params = scope.params.slice();
   var p = scope.nextParamIndex;
   if (base) {
-    where = where ? where + ' AND base = $' + p++ : 'WHERE base = $' + p++;
+    where = where + ' AND base = $' + p++;
     params.push(base);
+  }
+  if (deposito) {
+    where = where + ' AND deposito = $' + p++;
+    params.push(deposito);
   }
 
   var countResult = await db.query('SELECT COUNT(*) FROM bodega_items ' + where, params);
@@ -174,14 +190,19 @@ router.get('/bodega', async function (req, res) {
 router.get('/bodega/export', async function (req, res) {
   var search = req.query.search || '';
   var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
+  var deposito = req.query.deposito || '';
 
   var scope = await buildBodegaScope_(search);
   var where = scope.where;
   var params = scope.params.slice();
   var p = scope.nextParamIndex;
   if (base) {
-    where = where ? where + ' AND base = $' + p++ : 'WHERE base = $' + p++;
+    where = where + ' AND base = $' + p++;
     params.push(base);
+  }
+  if (deposito) {
+    where = where + ' AND deposito = $' + p++;
+    params.push(deposito);
   }
 
   var result = await db.query('SELECT base, cod_deposito, deposito, cod_articulo, articulo, stock FROM bodega_items ' + where + ' ORDER BY deposito, articulo', params);

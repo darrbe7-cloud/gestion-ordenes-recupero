@@ -130,7 +130,7 @@ router.get('/data', async function (req, res) {
   var params2 = scoped.params.slice();
   params2.push(pageSize, page * pageSize);
   var dataResult = await db.query(
-    'SELECT base, rut, nombre, comuna, direccion, tipo FROM data_rows ' + scoped.where +
+    'SELECT base, rut, nombre, comuna, direccion, tipo, distribuidor FROM data_rows ' + scoped.where +
     ' ORDER BY id LIMIT $' + scoped.nextParamIndex + ' OFFSET $' + (scoped.nextParamIndex + 1),
     params2
   );
@@ -138,7 +138,7 @@ router.get('/data', async function (req, res) {
   res.json({
     total: total,
     rows: dataResult.rows.map(function (r) {
-      return { SISTEMA: r.base, RUT: r.rut, NOMBRE: r.nombre, COMUNA: r.comuna, DIRECCION: r.direccion, TIPO: r.tipo };
+      return { SISTEMA: r.base, RUT: r.rut, NOMBRE: r.nombre, COMUNA: r.comuna, DIRECCION: r.direccion, TIPO: r.tipo, DISTRIBUIDOR: r.distribuidor };
     }),
     page: page,
     pageSize: pageSize
@@ -219,6 +219,17 @@ router.get('/base-info', async function (req, res) {
       fecha: await db.getMeta('LAST_UPLOAD_DATE_GX2') || '',
       archivo: await db.getMeta('LAST_UPLOAD_FILENAME_GX2') || ''
     }
+  });
+});
+
+/**
+ * Fechas de la última actualización del inventario de bodega (GX1/GX2),
+ * visibles para cualquier usuario logueado que vea la vista de bodega.
+ */
+router.get('/bodega-info', async function (req, res) {
+  res.json({
+    gx1: await db.getMeta('LAST_UPLOAD_DATE_BODEGA_GX1') || '',
+    gx2: await db.getMeta('LAST_UPLOAD_DATE_BODEGA_GX2') || ''
   });
 });
 

@@ -192,6 +192,43 @@ window.addEventListener('DOMContentLoaded', async function () {
 // ---------------------------------------------------------
 // CAMBIAR CONTRASEÑA PROPIA
 // ---------------------------------------------------------
+function openRecoverAdmin() {
+  document.getElementById('recoverCodeInput').value = '';
+  document.getElementById('recoverNewPasswordInput').value = '';
+  document.getElementById('recoverModalMsg').classList.add('hidden');
+  document.getElementById('recoverModalOverlay').classList.remove('hidden');
+}
+function closeRecoverAdmin() { document.getElementById('recoverModalOverlay').classList.add('hidden'); }
+
+async function submitRecoverAdmin() {
+  var recoveryCode = document.getElementById('recoverCodeInput').value;
+  var newPassword = document.getElementById('recoverNewPasswordInput').value;
+  var msgEl = document.getElementById('recoverModalMsg');
+  msgEl.classList.add('hidden');
+  try {
+    var res = await fetch('/api/recover-admin', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryCode: recoveryCode, newPassword: newPassword })
+    });
+    var data = await res.json();
+    msgEl.classList.remove('hidden');
+    if (data.ok) {
+      msgEl.className = 'success-text';
+      msgEl.textContent = 'Listo. La clave del usuario "' + data.username + '" fue restablecida. Ya puedes iniciar sesión con la nueva clave.';
+      setTimeout(closeRecoverAdmin, 2500);
+    } else {
+      msgEl.className = 'error-text';
+      msgEl.textContent = data.error;
+    }
+  } catch (e) {
+    msgEl.classList.remove('hidden');
+    msgEl.className = 'error-text';
+    msgEl.textContent = e.message;
+  }
+}
+
 function openChangePassword() {
   document.getElementById('newPasswordInput').value = '';
   document.getElementById('passModalMsg').classList.add('hidden');
@@ -792,8 +829,8 @@ function renderDataView(cardId, isAdmin) {
       '<button class="btn-primary" onclick="downloadExcel(\'' + cardId + '\')" id="downloadBtn_' + cardId + '">Descargar Excel</button>' +
     '</div>' +
     '<table>' +
-      '<thead><tr><th>Sistema</th><th>RUT</th><th>NOMBRE</th><th>COMUNA</th><th>DIRECCIÓN</th><th>TIPO</th></tr></thead>' +
-      '<tbody id="dataTableBody_' + cardId + '"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>' +
+      '<thead><tr><th>Sistema</th><th>RUT</th><th>NOMBRE</th><th>COMUNA</th><th>DIRECCIÓN</th><th>TIPO</th><th>DISTRIBUIDOR</th></tr></thead>' +
+      '<tbody id="dataTableBody_' + cardId + '"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>' +
     '</table>' +
     '<div class="pagination" id="pagination_' + cardId + '"></div>';
 
@@ -824,7 +861,7 @@ function onSearchData(cardId) {
 
 async function loadDataTable(cardId) {
   var tbody = document.getElementById('dataTableBody_' + cardId);
-  tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="muted">Cargando...</td></tr>';
   try {
     var qs = '?page=' + STATE.dataPage + '&pageSize=' + STATE.dataPageSize +
       '&search=' + encodeURIComponent(STATE.dataSearch) +
@@ -835,23 +872,23 @@ async function loadDataTable(cardId) {
     var res = await api('/data' + qs);
 
     if (res.processing) {
-      tbody.innerHTML = '<tr><td colspan="6" class="muted">La base se está actualizando en este momento, intenta de nuevo en unos minutos...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">La base se está actualizando en este momento, intenta de nuevo en unos minutos...</td></tr>';
       document.getElementById('pagination_' + cardId).innerHTML = '';
       return;
     }
     if (!res.rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="muted">Sin resultados.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">Sin resultados.</td></tr>';
     } else {
       var html = '';
       res.rows.forEach(function (r) {
         html += '<tr><td>' + sistemaBadge_(r.SISTEMA) + '</td><td>' + escapeHtml(r.RUT) + '</td><td>' + escapeHtml(r.NOMBRE) + '</td><td>' +
-                escapeHtml(r.COMUNA) + '</td><td>' + escapeHtml(r.DIRECCION) + '</td><td>' + escapeHtml(r.TIPO) + '</td></tr>';
+                escapeHtml(r.COMUNA) + '</td><td>' + escapeHtml(r.DIRECCION) + '</td><td>' + escapeHtml(r.TIPO) + '</td><td>' + escapeHtml(r.DISTRIBUIDOR) + '</td></tr>';
       });
       tbody.innerHTML = html;
     }
     renderPagination(cardId, res.total);
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="6" class="error-text">' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="error-text">' + e.message + '</td></tr>';
   }
 }
 
@@ -1334,19 +1371,27 @@ async function guardarDepositosVisibles() {
  * Vista de tabla de bodega, reutilizada por el admin (sin restricción de
  * depósito) y por el equipo de venta (ya restringido en el servidor).
  */
-var BODEGA_STATE = { page: 0, pageSize: 100, search: '', base: '' };
+var BODEGA_STATE = { page: 0, pageSize: 100, search: '', base: '', deposito: '' };
 
-function renderBodegaView(cardId, isAdmin) {
+async function renderBodegaView(cardId, isAdmin) {
   var card = document.getElementById(cardId);
   card.innerHTML =
     '<h2>Material en bodega</h2>' +
-    '<div class="field" style="max-width:220px;">' +
-      '<label>Sistema</label>' +
-      '<select id="bodegaSistemaSelect_' + cardId + '" onchange="onBodegaSistemaChange(\'' + cardId + '\', ' + isAdmin + ')">' +
-        '<option value="">GX1 y GX2</option>' +
-        '<option value="GX1">Solo GX1</option>' +
-        '<option value="GX2">Solo GX2</option>' +
-      '</select>' +
+    '<div class="form-row">' +
+      '<div class="field" style="max-width:220px;">' +
+        '<label>Sistema</label>' +
+        '<select id="bodegaSistemaSelect_' + cardId + '" onchange="onBodegaSistemaChange(\'' + cardId + '\', ' + isAdmin + ')">' +
+          '<option value="">GX1 y GX2</option>' +
+          '<option value="GX1">Solo GX1</option>' +
+          '<option value="GX2">Solo GX2</option>' +
+        '</select>' +
+      '</div>' +
+      '<div class="field" style="max-width:260px;">' +
+        '<label>Depósito</label>' +
+        '<select id="bodegaDepositoSelect_' + cardId + '" onchange="onBodegaDepositoChange(\'' + cardId + '\', ' + isAdmin + ')">' +
+          '<option value="">Todos los depósitos disponibles</option>' +
+        '</select>' +
+      '</div>' +
     '</div>' +
     '<div class="toolbar">' +
       '<input type="text" id="bodegaSearchInput_' + cardId + '" placeholder="Buscar por artículo o depósito...">' +
@@ -1358,10 +1403,29 @@ function renderBodegaView(cardId, isAdmin) {
       '<tbody id="bodegaTableBody_' + cardId + '"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>' +
     '</table>' +
     '<div class="pagination" id="bodegaPagination_' + cardId + '"></div>';
+
+  try {
+    var path = isAdmin ? '/admin/depositos' : '/venta/depositos';
+    var data = await api(path);
+    var opciones = isAdmin ? data.todos : data.depositos;
+    var sel = document.getElementById('bodegaDepositoSelect_' + cardId);
+    (opciones || []).forEach(function (d) {
+      var opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    });
+  } catch (e) {}
 }
 
 function onBodegaSistemaChange(cardId, isAdmin) {
   BODEGA_STATE.base = document.getElementById('bodegaSistemaSelect_' + cardId).value;
+  BODEGA_STATE.page = 0;
+  loadBodegaTable(cardId, isAdmin);
+}
+
+function onBodegaDepositoChange(cardId, isAdmin) {
+  BODEGA_STATE.deposito = document.getElementById('bodegaDepositoSelect_' + cardId).value;
   BODEGA_STATE.page = 0;
   loadBodegaTable(cardId, isAdmin);
 }
@@ -1377,7 +1441,8 @@ async function loadBodegaTable(cardId, isAdmin) {
   tbody.innerHTML = '<tr><td colspan="5" class="muted">Cargando...</td></tr>';
   try {
     var qs = '?page=' + BODEGA_STATE.page + '&pageSize=' + BODEGA_STATE.pageSize +
-      '&search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base);
+      '&search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base) +
+      '&deposito=' + encodeURIComponent(BODEGA_STATE.deposito);
     var path = isAdmin ? '/admin/bodega' + qs : '/venta/bodega' + qs;
     var res = await api(path);
     if (!res.rows.length) {
@@ -1413,7 +1478,7 @@ function changeBodegaPage(cardId, delta, isAdmin) {
 
 async function downloadBodega(cardId, isAdmin) {
   var btn = document.getElementById('bodegaDownloadBtn_' + cardId);
-  var qs = '?search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base);
+  var qs = '?search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base) + '&deposito=' + encodeURIComponent(BODEGA_STATE.deposito);
   var path = isAdmin ? '/api/admin/bodega/export' + qs : '/api/venta/bodega/export' + qs;
   await downloadFileFromApi_(path, btn, 'bodega.xlsx');
 }
@@ -1435,9 +1500,9 @@ var VENTA_ORDENES_STATE = { page: 0, pageSize: 100, search: '' };
 
 function renderVentaOrdenesView() {
   var card = document.getElementById('ventaOrdenesCard');
-  var tituloBase = STATE.rol === 'VENTA_GX1' ? 'GX1 (órdenes recientes)' : 'GX2';
+  var tituloBase = STATE.rol === 'VENTA_GX1' ? 'GX1' : 'GX2';
   card.innerHTML =
-    '<h2>Órdenes — ' + tituloBase + '</h2>' +
+    '<h2>Órdenes de recupero — ' + tituloBase + '</h2>' +
     '<div class="toolbar">' +
       '<input type="text" id="ventaOrdenesSearchInput" placeholder="Buscar por RUT, nombre, dirección o comuna...">' +
       '<button class="btn-secondary" onclick="onVentaOrdenesSearch()">Buscar</button>' +

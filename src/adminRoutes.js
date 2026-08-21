@@ -215,17 +215,19 @@ router.get('/bodega', async function (req, res) {
   var pageSize = Math.min(parseInt(req.query.pageSize || '100', 10), 500);
   var search = req.query.search || '';
   var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
+  var deposito = req.query.deposito || '';
 
-  var conditions = [];
+  var conditions = ['stock > 0']; // los ítems sin stock no se muestran
   var params = [];
   var p = 1;
   if (base) { conditions.push('base = $' + p++); params.push(base); }
+  if (deposito) { conditions.push('deposito = $' + p++); params.push(deposito); }
   if (search) {
     conditions.push('(articulo ILIKE $' + p + ' OR cod_articulo ILIKE $' + p + ' OR deposito ILIKE $' + p + ')');
     params.push('%' + search + '%');
     p++;
   }
-  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  var where = 'WHERE ' + conditions.join(' AND ');
 
   var countResult = await db.query('SELECT COUNT(*) FROM bodega_items ' + where, params);
   var total = Number(countResult.rows[0].count);
@@ -244,16 +246,18 @@ router.get('/bodega', async function (req, res) {
 router.get('/bodega/export', async function (req, res) {
   var search = req.query.search || '';
   var base = req.query.base === 'GX1' || req.query.base === 'GX2' ? req.query.base : '';
-  var conditions = [];
+  var deposito = req.query.deposito || '';
+  var conditions = ['stock > 0']; // los ítems sin stock no se muestran
   var params = [];
   var p = 1;
   if (base) { conditions.push('base = $' + p++); params.push(base); }
+  if (deposito) { conditions.push('deposito = $' + p++); params.push(deposito); }
   if (search) {
     conditions.push('(articulo ILIKE $' + p + ' OR cod_articulo ILIKE $' + p + ' OR deposito ILIKE $' + p + ')');
     params.push('%' + search + '%');
     p++;
   }
-  var where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  var where = 'WHERE ' + conditions.join(' AND ');
 
   var result = await db.query('SELECT base, cod_deposito, deposito, cod_articulo, articulo, stock FROM bodega_items ' + where + ' ORDER BY deposito, articulo', params);
   if (!result.rows.length) return res.status(404).json({ ok: false, error: 'No hay filas de bodega para exportar.' });

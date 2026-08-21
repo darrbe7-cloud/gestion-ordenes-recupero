@@ -123,7 +123,7 @@ router.get('/ordenes/export', async function (req, res) {
  * que el administrador dejó visibles de forma global.
  */
 async function buildBodegaScope_(search) {
-  var conditions = [];
+  var conditions = ['stock > 0']; // los ítems sin stock no se muestran
   var params = [];
   var p = 1;
 
@@ -139,7 +139,7 @@ async function buildBodegaScope_(search) {
     p++;
   }
 
-  return { where: conditions.length ? 'WHERE ' + conditions.join(' AND ') : '', params: params, nextParamIndex: p };
+  return { where: 'WHERE ' + conditions.join(' AND '), params: params, nextParamIndex: p };
 }
 
 router.get('/bodega', async function (req, res) {

@@ -129,6 +129,7 @@ function resetAppView() {
   document.getElementById('bodegaCardAdmin').innerHTML = '';
   document.getElementById('ventaOrdenesCard').innerHTML = '';
   document.getElementById('ventaBodegaCard').innerHTML = '';
+  document.getElementById('uploaderBodegaCard').innerHTML = '';
 
   if (processPollTimer) { clearInterval(processPollTimer); processPollTimer = null; }
   if (processPollTimerUploader) { clearInterval(processPollTimerUploader); processPollTimerUploader = null; }
@@ -154,7 +155,14 @@ function onLoginSuccess() {
     checkResumeProcessPollingUploader();
   } else if (STATE.rol === 'VENTA_GX1' || STATE.rol === 'VENTA_GX2') {
     document.getElementById('ventaDashboard').classList.remove('hidden');
-    switchVentaTab('v-ordenes');
+    var ordenesTabBtn = document.querySelector('#ventaTabs .tab-btn[data-vtab="v-ordenes"]');
+    if (STATE.rol === 'VENTA_GX2') {
+      ordenesTabBtn.classList.add('hidden');
+      switchVentaTab('v-bodega');
+    } else {
+      ordenesTabBtn.classList.remove('hidden');
+      switchVentaTab('v-ordenes');
+    }
   } else {
     document.getElementById('userDashboard').classList.remove('hidden');
     loadUserUploadDates();
@@ -269,7 +277,7 @@ function switchTab(tabId) {
 
   if (tabId === 'tab-users') loadUsers();
   if (tabId === 'tab-data') { renderDataView('dataCardAdmin', true); loadDataTable('dataCardAdmin'); }
-  if (tabId === 'tab-bodega') { loadDepositosVisibles(); renderBodegaView('bodegaCardAdmin', true); loadBodegaTable('bodegaCardAdmin', true); }
+  if (tabId === 'tab-bodega') { loadDepositosVisibles(); renderBodegaView('bodegaCardAdmin', 'admin'); loadBodegaTable('bodegaCardAdmin', 'admin'); }
   if (tabId === 'tab-upload') loadMetaStats();
   if (tabId === 'tab-modelos') loadModelosPermitidos();
   if (tabId === 'tab-motivos') loadMotivos();
@@ -472,6 +480,15 @@ async function checkResumeProcessPollingUploader() {
       processPollTimerUploader = setInterval(pollProcessStatusUploader, 2000);
     }
   } catch (e) {}
+}
+
+function switchUploaderTab(tabId) {
+  document.querySelectorAll('#up-subir, #up-bodega').forEach(function (el) { el.classList.add('hidden'); });
+  document.querySelectorAll('#uploaderTabs .tab-btn').forEach(function (el) { el.classList.remove('active'); });
+  document.getElementById(tabId).classList.remove('hidden');
+  document.querySelector('#uploaderTabs .tab-btn[data-uptab="' + tabId + '"]').classList.add('active');
+
+  if (tabId === 'up-bodega') { renderBodegaView('uploaderBodegaCard', 'uploader'); loadBodegaTable('uploaderBodegaCard', 'uploader'); }
 }
 
 async function loadUploaderHistory() {
@@ -1373,14 +1390,20 @@ async function guardarDepositosVisibles() {
  */
 var BODEGA_STATE = { page: 0, pageSize: 100, search: '', base: '', deposito: '' };
 
-async function renderBodegaView(cardId, isAdmin) {
+function bodegaPathPrefix_(mode) {
+  if (mode === 'admin') return '/admin';
+  if (mode === 'uploader') return '/upload';
+  return '/venta';
+}
+
+async function renderBodegaView(cardId, mode) {
   var card = document.getElementById(cardId);
   card.innerHTML =
     '<h2>Material en bodega</h2>' +
     '<div class="form-row">' +
       '<div class="field" style="max-width:220px;">' +
         '<label>Sistema</label>' +
-        '<select id="bodegaSistemaSelect_' + cardId + '" onchange="onBodegaSistemaChange(\'' + cardId + '\', ' + isAdmin + ')">' +
+        '<select id="bodegaSistemaSelect_' + cardId + '" onchange="onBodegaSistemaChange(\'' + cardId + '\', \'' + mode + '\')">' +
           '<option value="">GX1 y GX2</option>' +
           '<option value="GX1">Solo GX1</option>' +
           '<option value="GX2">Solo GX2</option>' +
@@ -1388,15 +1411,15 @@ async function renderBodegaView(cardId, isAdmin) {
       '</div>' +
       '<div class="field" style="max-width:260px;">' +
         '<label>Depósito</label>' +
-        '<select id="bodegaDepositoSelect_' + cardId + '" onchange="onBodegaDepositoChange(\'' + cardId + '\', ' + isAdmin + ')">' +
+        '<select id="bodegaDepositoSelect_' + cardId + '" onchange="onBodegaDepositoChange(\'' + cardId + '\', \'' + mode + '\')">' +
           '<option value="">Todos los depósitos disponibles</option>' +
         '</select>' +
       '</div>' +
     '</div>' +
     '<div class="toolbar">' +
       '<input type="text" id="bodegaSearchInput_' + cardId + '" placeholder="Buscar por artículo o depósito...">' +
-      '<button class="btn-secondary" onclick="onBodegaSearch(\'' + cardId + '\', ' + isAdmin + ')">Buscar</button>' +
-      '<button class="btn-primary" onclick="downloadBodega(\'' + cardId + '\', ' + isAdmin + ')" id="bodegaDownloadBtn_' + cardId + '">Descargar Excel</button>' +
+      '<button class="btn-secondary" onclick="onBodegaSearch(\'' + cardId + '\', \'' + mode + '\')">Buscar</button>' +
+      '<button class="btn-primary" onclick="downloadBodega(\'' + cardId + '\', \'' + mode + '\')" id="bodegaDownloadBtn_' + cardId + '">Descargar Excel</button>' +
     '</div>' +
     '<table>' +
       '<thead><tr><th>Sistema</th><th>Depósito</th><th>Cód. Artículo</th><th>Artículo</th><th>Stock</th></tr></thead>' +
@@ -1405,9 +1428,9 @@ async function renderBodegaView(cardId, isAdmin) {
     '<div class="pagination" id="bodegaPagination_' + cardId + '"></div>';
 
   try {
-    var path = isAdmin ? '/admin/depositos' : '/venta/depositos';
+    var path = bodegaPathPrefix_(mode) + '/depositos';
     var data = await api(path);
-    var opciones = isAdmin ? data.todos : data.depositos;
+    var opciones = mode === 'venta' ? data.depositos : data.todos;
     var sel = document.getElementById('bodegaDepositoSelect_' + cardId);
     (opciones || []).forEach(function (d) {
       var opt = document.createElement('option');
@@ -1418,32 +1441,32 @@ async function renderBodegaView(cardId, isAdmin) {
   } catch (e) {}
 }
 
-function onBodegaSistemaChange(cardId, isAdmin) {
+function onBodegaSistemaChange(cardId, mode) {
   BODEGA_STATE.base = document.getElementById('bodegaSistemaSelect_' + cardId).value;
   BODEGA_STATE.page = 0;
-  loadBodegaTable(cardId, isAdmin);
+  loadBodegaTable(cardId, mode);
 }
 
-function onBodegaDepositoChange(cardId, isAdmin) {
+function onBodegaDepositoChange(cardId, mode) {
   BODEGA_STATE.deposito = document.getElementById('bodegaDepositoSelect_' + cardId).value;
   BODEGA_STATE.page = 0;
-  loadBodegaTable(cardId, isAdmin);
+  loadBodegaTable(cardId, mode);
 }
 
-function onBodegaSearch(cardId, isAdmin) {
+function onBodegaSearch(cardId, mode) {
   BODEGA_STATE.search = document.getElementById('bodegaSearchInput_' + cardId).value;
   BODEGA_STATE.page = 0;
-  loadBodegaTable(cardId, isAdmin);
+  loadBodegaTable(cardId, mode);
 }
 
-async function loadBodegaTable(cardId, isAdmin) {
+async function loadBodegaTable(cardId, mode) {
   var tbody = document.getElementById('bodegaTableBody_' + cardId);
   tbody.innerHTML = '<tr><td colspan="5" class="muted">Cargando...</td></tr>';
   try {
     var qs = '?page=' + BODEGA_STATE.page + '&pageSize=' + BODEGA_STATE.pageSize +
       '&search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base) +
       '&deposito=' + encodeURIComponent(BODEGA_STATE.deposito);
-    var path = isAdmin ? '/admin/bodega' + qs : '/venta/bodega' + qs;
+    var path = bodegaPathPrefix_(mode) + '/bodega' + qs;
     var res = await api(path);
     if (!res.rows.length) {
       tbody.innerHTML = '<tr><td colspan="5" class="muted">Sin resultados.</td></tr>';
@@ -1455,33 +1478,34 @@ async function loadBodegaTable(cardId, isAdmin) {
       });
       tbody.innerHTML = html;
     }
-    renderBodegaPagination_(cardId, res.total, isAdmin);
+    renderBodegaPagination_(cardId, res.total, mode);
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="5" class="error-text">' + e.message + '</td></tr>';
   }
 }
 
-function renderBodegaPagination_(cardId, total, isAdmin) {
+function renderBodegaPagination_(cardId, total, mode) {
   var el = document.getElementById('bodegaPagination_' + cardId);
   var totalPages = Math.max(1, Math.ceil(total / BODEGA_STATE.pageSize));
   var currentPage = BODEGA_STATE.page + 1;
   el.innerHTML =
     '<span>' + total + ' resultados — página ' + currentPage + ' de ' + totalPages + '</span>' +
-    '<button class="btn-secondary" ' + (BODEGA_STATE.page <= 0 ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', -1, ' + isAdmin + ')">Anterior</button>' +
-    '<button class="btn-secondary" ' + (currentPage >= totalPages ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', 1, ' + isAdmin + ')">Siguiente</button>';
+    '<button class="btn-secondary" ' + (BODEGA_STATE.page <= 0 ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', -1, \'' + mode + '\')">Anterior</button>' +
+    '<button class="btn-secondary" ' + (currentPage >= totalPages ? 'disabled' : '') + ' onclick="changeBodegaPage(\'' + cardId + '\', 1, \'' + mode + '\')">Siguiente</button>';
 }
 
-function changeBodegaPage(cardId, delta, isAdmin) {
+function changeBodegaPage(cardId, delta, mode) {
   BODEGA_STATE.page = Math.max(0, BODEGA_STATE.page + delta);
-  loadBodegaTable(cardId, isAdmin);
+  loadBodegaTable(cardId, mode);
 }
 
-async function downloadBodega(cardId, isAdmin) {
+async function downloadBodega(cardId, mode) {
   var btn = document.getElementById('bodegaDownloadBtn_' + cardId);
   var qs = '?search=' + encodeURIComponent(BODEGA_STATE.search) + '&base=' + encodeURIComponent(BODEGA_STATE.base) + '&deposito=' + encodeURIComponent(BODEGA_STATE.deposito);
-  var path = isAdmin ? '/api/admin/bodega/export' + qs : '/api/venta/bodega/export' + qs;
+  var path = '/api' + bodegaPathPrefix_(mode) + '/bodega/export' + qs;
   await downloadFileFromApi_(path, btn, 'bodega.xlsx');
 }
+
 
 // ---------------------------------------------------------
 // VENTA (GX1 / GX2): órdenes por distribuidor + bodega
@@ -1493,7 +1517,7 @@ function switchVentaTab(tabId) {
   document.querySelector('#ventaTabs .tab-btn[data-vtab="' + tabId + '"]').classList.add('active');
 
   if (tabId === 'v-ordenes') { renderVentaOrdenesView(); loadVentaOrdenes(); }
-  if (tabId === 'v-bodega') { renderBodegaView('ventaBodegaCard', false); loadBodegaTable('ventaBodegaCard', false); }
+  if (tabId === 'v-bodega') { renderBodegaView('ventaBodegaCard', 'venta'); loadBodegaTable('ventaBodegaCard', 'venta'); }
 }
 
 var VENTA_ORDENES_STATE = { page: 0, pageSize: 100, search: '' };

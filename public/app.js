@@ -151,6 +151,7 @@ function onLoginSuccess() {
     checkResumeProcessPolling();
   } else if (STATE.rol === 'UPLOADER') {
     document.getElementById('uploaderDashboard').classList.remove('hidden');
+    switchUploaderTab('up-subir');
     loadUploaderHistory();
     checkResumeProcessPollingUploader();
   } else if (STATE.rol === 'VENTA_GX1' || STATE.rol === 'VENTA_GX2') {
